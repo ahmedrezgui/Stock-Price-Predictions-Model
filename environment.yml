@@ -26,9 +26,12 @@ dependencies:
       - python-dotenv
       - requests_cache
       - langchain
-      - langgraph
+      - langgraph==1.2.9
+      - langgraph-checkpoint
       - langchain-community
       - langchain-google-genai
+      - langchain-tavily
+      - tavily-python
       - pinecone-client
       - langchain-pinecone
       - pinecone-notebooks

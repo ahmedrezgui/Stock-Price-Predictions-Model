@@ -10,7 +10,7 @@ import pandas as pd
 from src import LSTMModel
 
 
-@patch("src.web.back.main.os.listdir")
+@patch("src.services.stock_data_service.os.listdir")
 @patch("dotenv.load_dotenv")
 @patch.dict(os.environ, {"WINDOW_SIZE": "1", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL", "DISABLE_BACKEND_CACHE": "true"})
 def test_get_companies(mock_dotenv, mock_listdir):
@@ -22,12 +22,12 @@ def test_get_companies(mock_dotenv, mock_listdir):
     assert response.status_code == 200
     assert response.json() == ["AB", "AL"]
 
-@patch("src.web.back.main.get_model")
-@patch("src.web.back.main.get_scaler")
-@patch("src.web.back.main.predict")
-@patch("src.web.back.main.os.path.exists")
-@patch("src.web.back.main.pd.read_csv")
-@patch("src.web.back.main.subprocess.run")
+@patch("src.services.stock_data_service.get_model")
+@patch("src.services.stock_data_service.get_scaler")
+@patch("src.services.stock_data_service.predict")
+@patch("src.services.stock_data_service.os.path.exists")
+@patch("src.services.stock_data_service.pd.read_csv")
+@patch("src.services.stock_data_service.subprocess.run")
 @patch("dotenv.load_dotenv")
 @patch.dict(os.environ, {"WINDOW_SIZE": "1", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL", "DISABLE_BACKEND_CACHE": "true"})
 def test_get_stock_valid(mock_dotenv, mock_subprocess, mock_read_csv, mock_exists, mock_predict, mock_get_scaler, mock_get_model):
@@ -53,7 +53,7 @@ def test_get_stock_valid(mock_dotenv, mock_subprocess, mock_read_csv, mock_exist
     assert data["columns"] == ["date", "ouverture", "haut", "bas", "cloture", "volume"]
     assert data["data"][0]["cloture"] == 100
 
-@patch("src.web.back.main.os.path.exists")
+@patch("src.services.stock_data_service.os.path.exists")
 @patch("dotenv.load_dotenv")
 @patch.dict(os.environ, {"WINDOW_SIZE": "1", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL", "DISABLE_BACKEND_CACHE": "true"})
 def test_get_stock_not_found(mock_dotenv, mock_exists):
