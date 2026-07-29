@@ -58,8 +58,64 @@ def test_get_stock_valid(mock_dotenv, mock_subprocess, mock_read_csv, mock_exist
 @patch.dict(os.environ, {"WINDOW_SIZE": "1", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL", "DISABLE_BACKEND_CACHE": "true"})
 def test_get_stock_not_found(mock_dotenv, mock_exists):
     mock_exists.return_value = False
-    
+
     with TestClient(app) as client:
         response = client.get("/stock/UNKNOWN")
-    
+
     assert response.status_code == 404
+
+
+@patch("src.web.back.main.ask")
+def test_rag_answers_a_json_question(mock_ask):
+    mock_ask.return_value = {
+        "text": "BIAT closed at 100.",
+        "sources": [{"title": "Market up", "date": "01/03/2024", "link": "https://x/a"}],
+    }
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/rag", json={"question": "what did BIAT close at?", "thread_id": "abc"}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "text": "BIAT closed at 100.",
+        "sources": [{"title": "Market up", "date": "01/03/2024", "link": "https://x/a"}],
+        "thread_id": "abc",
+    }
+    assert mock_ask.call_args.args[1:] == ("what did BIAT close at?", "abc")
+
+
+@patch("src.web.back.main.ask")
+def test_rag_starts_a_thread_when_none_is_given(mock_ask):
+    mock_ask.return_value = {"text": "hello", "sources": []}
+
+    with TestClient(app) as client:
+        response = client.post("/rag", json={"question": "hi"})
+
+    assert response.status_code == 200
+    assert response.json()["thread_id"]
+
+
+@patch("src.web.back.main.ask")
+def test_rag_still_accepts_a_plain_text_body(mock_ask):
+    mock_ask.return_value = {"text": "hello", "sources": []}
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/rag",
+            content="what did BIAT close at?",
+            headers={"Content-Type": "text/plain"},
+        )
+
+    assert response.status_code == 200
+    assert mock_ask.call_args.args[1] == "what did BIAT close at?"
+
+
+@patch("src.web.back.main.ask")
+def test_rag_rejects_an_empty_question(mock_ask):
+    with TestClient(app) as client:
+        response = client.post("/rag", json={"question": "   "})
+
+    assert response.status_code == 400
+    mock_ask.assert_not_called()

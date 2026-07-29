@@ -1,5 +1,4 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.params import Body
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import os, sys
 from pathlib import Path
@@ -11,10 +10,10 @@ from src.services import (
     DataUnavailableError,
     ModelUnavailableError,
 )
-sys.path.insert(0, str(Path(os.path.dirname(__file__)) / '..' / '..'))
-from rag import create_agents_graph
+from src.rag import ask, create_agents_graph
 from dotenv import load_dotenv
 import json
+import uuid
 
 
 load_dotenv()
@@ -72,14 +71,42 @@ def get_stock(company: str):
     return res
 
 
+def parse_rag_request(raw_body: str):
+    """
+    Read a {"question", "thread_id"} body.
+
+    Clients that still POST the bare question as plain text keep working; each of
+    those gets a fresh conversation, since they carry no thread of their own.
+    """
+    try:
+        payload = json.loads(raw_body)
+    except ValueError:
+        payload = None
+
+    if isinstance(payload, dict):
+        question = payload.get("question") or ""
+        thread_id = payload.get("thread_id") or str(uuid.uuid4())
+    else:
+        question = payload if isinstance(payload, str) else raw_body
+        thread_id = str(uuid.uuid4())
+
+    return question.strip(), thread_id
+
+
 @app.post("/rag")
-def rag_query(query: str = Body(...)):
+async def rag_query(request: Request):
     """
     Endpoint to handle RAG queries.
     """
+    raw_body = (await request.body()).decode("utf-8").strip()
+    question, thread_id = parse_rag_request(raw_body)
+    if not question:
+        raise HTTPException(status_code=400, detail="A question is required")
+
     try:
-        input = {"question": query}
-        response = agents.invoke(input, stream_mode="values")
-        return {"response": response}
+        answer = ask(agents, question, thread_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))    
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {**answer, "thread_id": thread_id}
+

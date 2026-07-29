@@ -37,6 +37,7 @@ dependencies:
       - azure-identity
       - joblib
       - starlette>=0.27.0,<0.28.0
-      - httpx>=0.23.1,<0.24.0
+      # langgraph-sdk needs >=0.25.2; starlette 0.27's TestClient breaks on >=0.28
+      - httpx>=0.25.2,<0.28
       - dvc-azure
       - azure-ai-ml
