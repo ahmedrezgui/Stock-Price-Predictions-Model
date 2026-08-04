@@ -108,5 +108,6 @@ async def rag_query(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    # answer carries the text, its sources, and any charts drawn for it.
     return {**answer, "thread_id": thread_id}
 

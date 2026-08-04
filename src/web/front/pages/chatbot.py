@@ -65,6 +65,35 @@ def render_sources(sources):
             st.markdown(f"- {entry}")
 
 
+def render_charts(charts, key_prefix):
+    """
+    Draw the figures the assistant produced for an answer.
+
+    The figure arrives as plain JSON built on the server. theme=None keeps the
+    colours it was built with, which were chosen to read on either theme; letting
+    Streamlit restyle it would override them.
+
+    Args:
+        charts: the chart payloads, each with a title, figure and description.
+        key_prefix: distinguishes the charts of one message from another's, since
+            every chart on the page needs its own key.
+    """
+    for index, chart in enumerate(charts or []):
+        figure = chart.get("figure")
+        if not figure:
+            continue
+        if chart.get("title"):
+            st.markdown(f"**{chart['title']}**")
+        st.plotly_chart(
+            figure,
+            use_container_width=True,
+            theme=None,
+            key=f"{key_prefix}_chart_{index}",
+        )
+        if chart.get("description"):
+            st.caption(chart["description"])
+
+
 st.set_page_config(page_title="StockWise", page_icon="📈", layout="centered")
 st.header("💬 AI Chat Assistant")
 
@@ -113,9 +142,10 @@ with st.sidebar:
 # ===========================
 
 
-for message in st.session_state.messages:
+for index, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        render_charts(message.get("charts"), key_prefix=f"history_{index}")
         render_sources(message.get("sources"))
 
 
@@ -140,6 +170,7 @@ if prompt := st.chat_input("Ask me"):
         if res is not None:
             response = res.get("text", "")
             sources = res.get("sources", [])
+            charts = res.get("charts", [])
             result = response.split(' ')
             for i, word in enumerate(result):
                 full_response += word
@@ -150,9 +181,15 @@ if prompt := st.chat_input("Ask me"):
                 time.sleep(0.02)
 
             message_placeholder.markdown(full_response)
+            render_charts(charts, key_prefix=f"live_{len(st.session_state.messages)}")
             render_sources(sources)
 
             # Add assistant response to chat history
             st.session_state.messages.append(
-                {"role": "assistant", "content": response, "sources": sources}
+                {
+                    "role": "assistant",
+                    "content": response,
+                    "sources": sources,
+                    "charts": charts,
+                }
             )

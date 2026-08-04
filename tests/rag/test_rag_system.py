@@ -3,6 +3,7 @@ import os
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import pandas as pd
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -57,12 +58,26 @@ def relevance(verdict):
     return checker
 
 
-def build(llm, topic="rag", grades=("yes",), tools=None):
-    """Compile a graph wired to scripted stand-ins for every model call."""
+def build(llm, topic="rag", grades=("yes",), tools=None, web_results=None):
+    """
+    Compile a graph wired to scripted stand-ins for every model call.
+
+    Args:
+        web_results: when given, the fallback search is treated as configured and
+            returns these documents; otherwise it is treated as unavailable.
+    """
     patches = [
         patch("src.rag.rag_system.get_assistant_llm", return_value=llm),
         patch("src.rag.rag_system.topic_checker", relevance(topic)),
         patch("src.rag.rag_system.answer_grader_agent", graded(*grades)),
+        patch(
+            "src.rag.rag_system.web_search_configured",
+            return_value=web_results is not None,
+        ),
+        patch(
+            "src.rag.rag_system.run_search",
+            return_value={"documents": web_results or []},
+        ),
     ]
     for p in patches:
         p.start()
@@ -284,6 +299,138 @@ def test_the_conversation_is_remembered_across_turns():
         isinstance(m, HumanMessage) and m.content == "what did BIAT close at?"
         for m in second_turn
     )
+
+
+@patch.dict(os.environ, {"AGENT_MAX_RETRIES": "1"})
+def test_the_web_is_searched_once_before_giving_up():
+    llm = ScriptedLLM(AIMessage(content="a weak answer"))
+    graph, patches = build(
+        llm,
+        grades=("no",),
+        web_results=[{
+            "title": "Late news",
+            "date": "2024-03-01",
+            "link": "https://x/late",
+            "content": "Something happened.",
+        }],
+    )
+    try:
+        state = ask(graph, "what happened yesterday?")
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert state["web_searched"] is True
+    # First attempt, one retry, then one more after the search.
+    assert len(llm.calls) == 3
+    # What the search turned up is citable even though no tool call produced it.
+    assert state["sources"] == [
+        {"title": "Late news", "date": "2024-03-01", "link": "https://x/late"}
+    ]
+
+
+@patch.dict(os.environ, {"AGENT_MAX_RETRIES": "1"})
+def test_the_web_is_not_searched_when_it_is_unconfigured():
+    llm = ScriptedLLM(AIMessage(content="a weak answer"))
+    graph, patches = build(llm, grades=("no",), web_results=None)
+    try:
+        state = ask(graph, "what happened yesterday?")
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert not state.get("web_searched")
+    assert len(llm.calls) == 2
+    assert state["generation"] == "a weak answer"
+
+
+@patch.dict(os.environ, {"AGENT_MAX_RETRIES": "0"})
+def test_the_fallback_search_is_spent_only_once():
+    llm = ScriptedLLM(AIMessage(content="a weak answer"))
+    graph, patches = build(llm, grades=("no",), web_results=[])
+    try:
+        state = ask(graph, "what happened yesterday?")
+    finally:
+        for p in patches:
+            p.stop()
+
+    # Without this the graph would search, fail, and search again forever.
+    assert len(llm.calls) == 2
+    assert state["generation"] == "a weak answer"
+
+
+def test_a_chart_reaches_the_answer():
+    from src.rag.tools import plot_stock
+
+    llm = ScriptedLLM(
+        tool_call("plot_stock", {"company": "AB"}),
+        AIMessage(content="Here is the chart."),
+    )
+    history = pd.DataFrame({
+        "date": pd.date_range("2024-01-01", periods=3, freq="D"),
+        "ouverture": [1.0, 2.0, 3.0],
+        "haut": [1.0, 2.0, 3.0],
+        "bas": [1.0, 2.0, 3.0],
+        "cloture": [1.0, 2.0, 3.0],
+        "volume": [10, 10, 10],
+    })
+
+    graph, patches = build(llm, tools=[plot_stock])
+    try:
+        with patch("src.rag.tools.frames.load_company_df", return_value=history):
+            state = ask(graph, "chart AB")
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert len(state["charts"]) == 1
+    assert state["charts"][0]["title"] == "AB closing price"
+
+
+def test_a_chart_does_not_follow_the_conversation_into_the_next_answer():
+    from src.rag.tools import plot_stock
+
+    llm = ScriptedLLM(
+        tool_call("plot_stock", {"company": "AB"}),
+        AIMessage(content="Here is the chart."),
+        AIMessage(content="No chart this time."),
+    )
+    history = pd.DataFrame({
+        "date": pd.date_range("2024-01-01", periods=3, freq="D"),
+        "ouverture": [1.0, 2.0, 3.0],
+        "haut": [1.0, 2.0, 3.0],
+        "bas": [1.0, 2.0, 3.0],
+        "cloture": [1.0, 2.0, 3.0],
+        "volume": [10, 10, 10],
+    })
+
+    graph, patches = build(llm, tools=[plot_stock])
+    try:
+        with patch("src.rag.tools.frames.load_company_df", return_value=history):
+            first = ask(graph, "chart AB", thread_id="thread-c")
+            second = ask(graph, "and what about the news?", thread_id="thread-c")
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert len(first["charts"]) == 1
+    assert second["charts"] == []
+
+
+@patch.dict(os.environ, {"AGENT_MAX_RETRIES": "1"})
+def test_the_retry_budget_is_restored_for_each_new_question():
+    llm = ScriptedLLM(AIMessage(content="a weak answer"))
+    graph, patches = build(llm, grades=("no",))
+    try:
+        ask(graph, "why did the market move?", thread_id="thread-d")
+        ask(graph, "and last month?", thread_id="thread-d")
+    finally:
+        for p in patches:
+            p.stop()
+
+    # One attempt plus one retry, twice over. Without a per-turn reset the second
+    # question would inherit the spent budget and never get its retry.
+    assert len(llm.calls) == 4
 
 
 def test_separate_threads_do_not_share_history():

@@ -1,3 +1,5 @@
+from .analytics_tools import analyze_stock_performance, compare_stocks, top_movers
+from .plot_tools import plot_comparison, plot_stock
 from .prediction_tools import predict_stock
 from .retrieval_tools import (
     RETRIEVE_NEWS_TOOL,
@@ -6,11 +8,23 @@ from .retrieval_tools import (
     retrieve_news,
 )
 from .stock_data_tools import get_stock_data, list_available_companies
+from .web_search_tools import WEB_SEARCH_TOOL, is_configured, run_search, web_search
 
-# The toolbox handed to the agent, ordered roughly by how often it is needed.
+# The toolbox handed to the agent, grouped by what each group is for: finding out
+# what happened, reading the numbers, working them out, drawing them, and looking
+# beyond the archive.
 AGENT_TOOLS = [
     retrieve_news,
     get_stock_data,
     predict_stock,
+    analyze_stock_performance,
+    compare_stocks,
+    top_movers,
+    plot_stock,
+    plot_comparison,
+    web_search,
     list_available_companies,
 ]
+
+# Tools whose results are citable, and so are collected as sources for the answer.
+SOURCE_TOOLS = {RETRIEVE_NEWS_TOOL, WEB_SEARCH_TOOL}

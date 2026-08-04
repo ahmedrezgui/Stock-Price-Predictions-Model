@@ -7,6 +7,7 @@ from typing import Optional
 
 from langchain_core.tools import tool
 
+from ..agents.document_grader import keep_relevant
 from ..pinecone_vector_store import get_pinecone_vector_store
 
 RETRIEVE_NEWS_TOOL = "retrieve_news"
@@ -105,18 +106,31 @@ def retrieve_news(
     except Exception as e:
         return json.dumps({"error": f"News search failed: {e}", "documents": []})
 
-    return json.dumps(
+    passages = [
         {
-            "documents": [
-                {
-                    "title": d.metadata.get("title"),
-                    "date": d.metadata.get("date"),
-                    "link": d.metadata.get("link"),
-                    "content": d.page_content,
-                }
-                for d in documents
-            ]
-        },
-        ensure_ascii=False,
-        default=str,
-    )
+            "title": d.metadata.get("title"),
+            "date": d.metadata.get("date"),
+            "link": d.metadata.get("link"),
+            "content": d.page_content,
+        }
+        for d in documents
+    ]
+
+    # A similarity search returns its k nearest passages however distant they are,
+    # so what comes back is filtered before the agent ever sees it.
+    retrieved = len(passages)
+    passages = keep_relevant(query, passages)
+
+    payload = {"documents": passages}
+    if retrieved and not passages:
+        payload["note"] = (
+            "The archive returned passages but none of them bore on this query. "
+            "Try different wording, widen the dates, or search the web instead."
+        )
+    elif retrieved > len(passages):
+        payload["note"] = (
+            f"{retrieved - len(passages)} of {retrieved} retrieved passages were "
+            "dropped as unrelated to the query."
+        )
+
+    return json.dumps(payload, ensure_ascii=False, default=str)

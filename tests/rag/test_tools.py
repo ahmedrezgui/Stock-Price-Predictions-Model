@@ -18,6 +18,21 @@ from src.services import (
 )
 
 
+@pytest.fixture(autouse=True)
+def keep_every_passage():
+    """
+    Relevance grading is tested in test_document_grader.py.
+
+    Everywhere else it should pass passages through untouched, so that a test
+    about retrieval is not also a test about grading.
+    """
+    with patch(
+        "src.rag.tools.retrieval_tools.keep_relevant",
+        side_effect=lambda query, documents: documents,
+    ):
+        yield
+
+
 def _price_history(days=5, start="2024-01-01"):
     dates = pd.date_range(start=start, periods=days, freq="D")
     return pd.DataFrame({
@@ -123,6 +138,44 @@ def test_retrieve_news_reports_failure_without_raising(mock_store):
 
     assert payload["documents"] == []
     assert "pinecone down" in payload["error"]
+
+
+@patch("src.rag.tools.retrieval_tools.get_vector_store")
+def test_retrieve_news_drops_passages_the_grader_rejects(mock_store):
+    retriever = MagicMock()
+    retriever.invoke.return_value = [
+        Document(page_content="relevant", metadata={"title": "A", "link": "https://x/a"}),
+        Document(page_content="unrelated", metadata={"title": "B", "link": "https://x/b"}),
+    ]
+    mock_store.return_value.as_retriever.return_value = retriever
+
+    with patch(
+        "src.rag.tools.retrieval_tools.keep_relevant",
+        side_effect=lambda query, documents: documents[:1],
+    ):
+        payload = json.loads(retrieve_news.invoke({"query": "market"}))
+
+    assert [d["title"] for d in payload["documents"]] == ["A"]
+    assert "1 of 2 retrieved passages were dropped" in payload["note"]
+
+
+@patch("src.rag.tools.retrieval_tools.get_vector_store")
+def test_retrieve_news_says_so_when_grading_leaves_nothing(mock_store):
+    retriever = MagicMock()
+    retriever.invoke.return_value = [
+        Document(page_content="unrelated", metadata={"title": "B", "link": "https://x/b"})
+    ]
+    mock_store.return_value.as_retriever.return_value = retriever
+
+    with patch(
+        "src.rag.tools.retrieval_tools.keep_relevant",
+        side_effect=lambda query, documents: [],
+    ):
+        payload = json.loads(retrieve_news.invoke({"query": "market"}))
+
+    assert payload["documents"] == []
+    # The agent is told to change tack rather than left to guess.
+    assert "search the web instead" in payload["note"]
 
 
 # --------------------------------------------------------------------- stock data

@@ -1,9 +1,10 @@
 """
 The assistant's LangGraph workflow.
 
-A question is first screened for relevance, then handed to a tool-calling agent that
-decides for itself what to look up. Once the agent answers, the answer is graded, and a
-poor one sends it back round with a bounded retry budget.
+A question is first screened for relevance, then handed to a tool-calling agent
+that decides for itself what to look up, calculate or draw. Once it answers, the
+answer is graded: a poor one is sent back for another attempt, and when the retry
+budget runs out the open web is searched once before the best attempt is returned.
 """
 
 import json
@@ -17,15 +18,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-from .agents import (
-    answer_grader_agent,
-    build_system_message,
-    get_assistant_llm,
-    off_topic_responder,
-    topic_checker,
-)
+from .agents import answer_grader_agent, off_topic_responder, topic_checker
+from .agents.assistant import build_system_message, get_assistant_llm
 from .checkpointer import get_checkpointer
-from .tools import AGENT_TOOLS, RETRIEVE_NEWS_TOOL
+from .tools import AGENT_TOOLS, SOURCE_TOOLS
+from .tools.web_search_tools import is_configured as web_search_configured
+from .tools.web_search_tools import run_search
 
 load_dotenv()
 
@@ -36,10 +34,30 @@ RETRY_PROMPT = (
     "and answer again. If the information simply is not available, say so plainly."
 )
 
+WEB_FALLBACK_PROMPT = (
+    "The stored archive did not settle this. Here are results from a web search "
+    "for the same question:\n\n{results}\n\nAnswer again using them if they help, "
+    "attributing anything you take from them. If they do not help either, say "
+    "plainly what you could not find."
+)
+
 FALLBACK_ANSWER = (
     "I could not put together an answer for that. Try rephrasing the question, or ask "
     "about a specific company or a recent market event."
 )
+
+
+def merge_charts(existing, new):
+    """
+    Reducer for the chart list.
+
+    Charts arrive one tool call at a time and have to accumulate through a turn,
+    but they must not carry over into the next question in the same conversation.
+    Passing None clears the list, which is how each turn starts clean.
+    """
+    if new is None:
+        return []
+    return (existing or []) + list(new)
 
 
 class State(TypedDict):
@@ -48,8 +66,11 @@ class State(TypedDict):
         messages: the running conversation, including tool calls and their results
         question: the question being answered this turn
         generation: the answer text produced for the user
-        sources: the news articles the answer drew on
+        sources: the articles and pages the answer drew on
+        charts: figures drawn by the plotting tools this turn
+        web_sources: pages found by the fallback search, which no tool call cites
         retries: how many times the answer has been sent back for another attempt
+        web_searched: whether the fallback search has already been spent
         grade: whether the last answer was judged to address the question
     """
 
@@ -57,7 +78,10 @@ class State(TypedDict):
     question: str
     generation: str
     sources: List[dict]
+    charts: Annotated[List[dict], merge_charts]
+    web_sources: List[dict]
     retries: int
+    web_searched: bool
     grade: str
 
 
@@ -122,30 +146,66 @@ def recent_exchange(messages, limit: int = 4) -> str:
     return "\n".join(labelled)
 
 
-def collect_sources(messages) -> List[dict]:
-    """Pull the articles cited by every news search made this turn."""
-    sources = []
+def dedupe_sources(sources) -> List[dict]:
+    """Drop repeated links while keeping the order they were first cited in."""
     seen = set()
+    unique = []
+    for source in sources:
+        link = source.get("link")
+        if link in seen:
+            continue
+        seen.add(link)
+        unique.append(source)
+    return unique
+
+
+def collect_sources(messages, extra=None) -> List[dict]:
+    """
+    Gather everything the answer can cite.
+
+    Args:
+        messages: the conversation, scanned for results of the citable tools.
+        extra: sources from the fallback search, which the agent never called and
+            so has no tool message for.
+    """
+    sources = []
     for message in messages:
-        if not isinstance(message, ToolMessage) or message.name != RETRIEVE_NEWS_TOOL:
+        if not isinstance(message, ToolMessage) or message.name not in SOURCE_TOOLS:
             continue
         try:
             payload = json.loads(message.content)
         except (TypeError, ValueError):
             continue
         for document in payload.get("documents", []):
-            link = document.get("link")
-            if link in seen:
-                continue
-            seen.add(link)
             sources.append(
                 {
                     "title": document.get("title"),
                     "date": document.get("date"),
-                    "link": link,
+                    "link": document.get("link"),
                 }
             )
-    return sources
+
+    return dedupe_sources(sources + list(extra or []))
+
+
+@log_execution_time
+def prepare(state: State):
+    """
+    Clear the previous turn's working state.
+
+    Conversation history is kept between questions, but its results are not: a
+    chart drawn last time must not reappear beside this answer, and the retry
+    budget has to start full again.
+    """
+    return {
+        "charts": None,
+        "sources": [],
+        "web_sources": [],
+        "generation": "",
+        "retries": 0,
+        "web_searched": False,
+        "grade": "",
+    }
 
 
 @log_execution_time
@@ -229,14 +289,54 @@ def finalize(state: State):
     """
     return {
         "generation": message_text(last_ai_message(state["messages"])),
-        "sources": collect_sources(state["messages"]),
+        "sources": collect_sources(state["messages"], state.get("web_sources")),
+    }
+
+
+@log_execution_time
+def web_fallback(state: State):
+    """
+    Search the open web once, after the retry budget is spent.
+
+    This is the last thing tried before returning a poor answer: the archive
+    stops at what has been scraped, so a question about the last day or two can
+    fail every retry and still be answerable from the web.
+
+    Args:
+        state (State): The state of the graph.
+
+    Returns:
+        state (dict): the results, handed to the agent for one more attempt.
+    """
+    results = run_search(state["question"])
+    documents = results.get("documents", [])
+
+    if not documents:
+        summary = results.get("error") or "The web search returned nothing."
+    else:
+        summary = "\n\n".join(
+            f"{d.get('title')} ({d.get('link')}): {d.get('content')}"
+            for d in documents
+        )
+
+    return {
+        "web_searched": True,
+        "web_sources": [
+            {
+                "title": d.get("title"),
+                "date": d.get("date"),
+                "link": d.get("link"),
+            }
+            for d in documents
+        ],
+        "messages": [HumanMessage(content=WEB_FALLBACK_PROMPT.format(results=summary))],
     }
 
 
 @log_execution_time
 def grade_answer(state: State):
     """
-    Judge whether the answer addresses the question, and spend a retry if not.
+    Judge whether the answer addresses the question, and decide what to try next.
 
     Args:
         state (State): The state of the graph.
@@ -259,20 +359,28 @@ def grade_answer(state: State):
     else:
         grade = "no"
 
-    if grade == "no" and retries < max_retries():
-        return {
-            "grade": "no",
-            "retries": retries + 1,
-            "messages": [HumanMessage(content=RETRY_PROMPT)],
-        }
+    if grade == "no":
+        if retries < max_retries():
+            return {
+                "grade": "no",
+                "retries": retries + 1,
+                "messages": [HumanMessage(content=RETRY_PROMPT)],
+            }
+        if not state.get("web_searched") and web_search_configured():
+            return {"grade": "fallback"}
 
-    # Out of retries: return the best attempt rather than nothing.
+    # Nothing left to try: return the best attempt rather than nothing.
     return {"grade": "yes", "generation": generation or FALLBACK_ANSWER}
 
 
 def route_after_grade(state: State):
-    """Send a rejected answer back to the agent while the retry budget allows."""
-    return "retry" if state.get("grade") == "no" else "accept"
+    """Retry, widen the search to the web, or accept the answer as it stands."""
+    grade = state.get("grade")
+    if grade == "no":
+        return "retry"
+    if grade == "fallback":
+        return "fallback"
+    return "accept"
 
 
 def create_agents_graph(checkpointer=None, tools=None):
@@ -294,14 +402,17 @@ def create_agents_graph(checkpointer=None, tools=None):
 
     workflow = StateGraph(State)
 
+    workflow.add_node("prepare", prepare)
     workflow.add_node("off_topic", off_topic)
     workflow.add_node("agent", agent)
     workflow.add_node("tools", ToolNode(tools))
     workflow.add_node("finalize", finalize)
     workflow.add_node("grade_answer", grade_answer)
+    workflow.add_node("web_fallback", web_fallback)
 
+    workflow.add_edge(START, "prepare")
     workflow.add_conditional_edges(
-        START,
+        "prepare",
         check_topic_relevency,
         {
             "off_topic": "off_topic",
@@ -324,21 +435,26 @@ def create_agents_graph(checkpointer=None, tools=None):
         route_after_grade,
         {
             "retry": "agent",
+            "fallback": "web_fallback",
             "accept": END,
         },
     )
+    workflow.add_edge("web_fallback", "agent")
 
     return workflow.compile(checkpointer=checkpointer)
 
 
 def ask(graph, question: str, thread_id: str) -> dict:
     """
-    Put one question to the assistant and return its answer with any sources.
+    Put one question to the assistant and return its answer.
 
     Args:
         graph: a graph built by create_agents_graph.
         question: the user's question.
         thread_id: identifies the conversation this question belongs to.
+
+    Returns:
+        The answer text, the sources behind it, and any charts drawn for it.
     """
     state = graph.invoke(
         {"question": question, "messages": [HumanMessage(content=question)]},
@@ -347,4 +463,5 @@ def ask(graph, question: str, thread_id: str) -> dict:
     return {
         "text": state.get("generation") or FALLBACK_ANSWER,
         "sources": state.get("sources") or [],
+        "charts": state.get("charts") or [],
     }
