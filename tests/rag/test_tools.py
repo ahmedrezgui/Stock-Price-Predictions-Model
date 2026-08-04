@@ -72,6 +72,50 @@ def test_retrieve_news_filters_to_news_source(mock_store):
 
 
 @patch("src.rag.tools.retrieval_tools.get_vector_store")
+def test_retrieve_news_filters_by_date_range(mock_store):
+    retriever = MagicMock()
+    retriever.invoke.return_value = []
+    mock_store.return_value.as_retriever.return_value = retriever
+
+    retrieve_news.invoke(
+        {"query": "market", "date_from": "2024-03-01", "date_to": "2024-03-15"}
+    )
+
+    metadata_filter = mock_store.return_value.as_retriever.call_args.kwargs[
+        "search_kwargs"
+    ]["filter"]
+    assert metadata_filter["source"] == "news"
+    # 2024-03-01T00:00:00Z through the last second of 2024-03-15, so the closing
+    # day is included rather than cut off at midnight.
+    assert metadata_filter["timestamp"]["$gte"] == 1709251200
+    assert metadata_filter["timestamp"]["$lte"] == 1710547199
+
+
+@patch("src.rag.tools.retrieval_tools.get_vector_store")
+def test_retrieve_news_accepts_an_open_ended_range(mock_store):
+    retriever = MagicMock()
+    retriever.invoke.return_value = []
+    mock_store.return_value.as_retriever.return_value = retriever
+
+    retrieve_news.invoke({"query": "market", "date_from": "2024-03-01"})
+
+    metadata_filter = mock_store.return_value.as_retriever.call_args.kwargs[
+        "search_kwargs"
+    ]["filter"]
+    assert metadata_filter["timestamp"] == {"$gte": 1709251200}
+
+
+@patch("src.rag.tools.retrieval_tools.get_vector_store")
+def test_retrieve_news_rejects_a_misformatted_date(mock_store):
+    payload = json.loads(
+        retrieve_news.invoke({"query": "market", "date_from": "01/03/2024"})
+    )
+
+    assert "YYYY-MM-DD" in payload["error"]
+    mock_store.assert_not_called()
+
+
+@patch("src.rag.tools.retrieval_tools.get_vector_store")
 def test_retrieve_news_reports_failure_without_raising(mock_store):
     mock_store.side_effect = RuntimeError("pinecone down")
 

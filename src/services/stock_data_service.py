@@ -17,8 +17,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from utils import predict
 from ..handlers import get_model, get_scaler
+
+
+def predict(*args, **kwargs):
+    """
+    Forecast with the project's prediction routine.
+
+    utils imports src, so importing it up here would close a cycle and break any
+    entry point that reaches src through utils, such as `python -m scripts.*`.
+    """
+    from utils import predict as run_prediction
+
+    return run_prediction(*args, **kwargs)
 
 
 DATA_DIR = os.path.abspath(

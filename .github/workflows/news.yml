@@ -1,8 +1,18 @@
 name: Store News Articles
 
-on: 
+on:
+  schedule:
+    # 18:00 UTC on weekdays, after the Tunis session has closed and the day's
+    # articles are published.
+    - cron: "0 18 * * 1-5"
   workflow_dispatch:
-    
+    inputs:
+      date:
+        description: "Articles date in dd/mm/YYYY format (defaults to today)"
+        required: false
+        type: string
+
+
 env:
   KERAS_BACKEND: ${{ vars.KERAS_BACKEND }}
   MODEL_NAME: ${{ vars.MODEL_NAME }}
@@ -56,5 +66,9 @@ jobs:
       - name: Extract and Store News Articles
         run: |
             source $HOME/miniconda/bin/activate
-            conda activate Stock_Price_Prediction 
-            python -m scripts.news_scraper 
+            conda activate Stock_Price_Prediction
+            if [ -n "${{ inputs.date }}" ]; then
+              python -m scripts.news_scraper --date "${{ inputs.date }}"
+            else
+              python -m scripts.news_scraper
+            fi 
