@@ -80,7 +80,8 @@ def configured_store() -> Store:
     raise ValueError("FORECAST_STORAGE must be local or azure")
 
 
-def snapshot(frame: pd.DataFrame, metadata: dict, store: Store) -> dict:
+def snapshot_identity(frame: pd.DataFrame, metadata: dict):
+    """Compute the same dataset identity with or without persisting a snapshot."""
     stream = BytesIO()
     frame.to_parquet(stream, index=False)
     data = stream.getvalue()
@@ -89,6 +90,12 @@ def snapshot(frame: pd.DataFrame, metadata: dict, store: Store) -> dict:
     version = sha256(identity).hexdigest()[:20]
     key = f"market-data/processed/{version}/{metadata['symbol']}.parquet"
     manifest = {**metadata, "dataset_version": version, "sha256": checksum, "key": key}
+    return manifest, data
+
+
+def snapshot(frame: pd.DataFrame, metadata: dict, store: Store) -> dict:
+    manifest, data = snapshot_identity(frame, metadata)
+    key, version = manifest["key"], manifest["dataset_version"]
     store.put(key, data)
     store.put(f"market-data/processed/{version}/manifest.json", json.dumps(manifest, indent=2, sort_keys=True).encode())
     return manifest

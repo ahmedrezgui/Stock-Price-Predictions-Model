@@ -24,6 +24,7 @@ def main():
             command.add_argument("--folds", type=int, default=2)
             command.add_argument("--artifacts", default="artifacts/models")
             command.add_argument("--mlflow-uri")
+            command.add_argument("--mlflow-experiment")
     report = sub.add_parser("report")
     report.add_argument("--output", required=True)
     sync = sub.add_parser("storage")
@@ -87,6 +88,7 @@ def main():
             args.folds,
             args.artifacts,
             args.mlflow_uri,
+            args.mlflow_experiment,
         )
         print(f"Scored {len(result['models'])} models. Report: {args.output}/evaluation_report.md")
         return
@@ -94,50 +96,58 @@ def main():
     from .data import fit_scaler, split_masks, transform
     from .models import ARIMAForecaster, create_forecaster
 
-    frame, columns, samples, manifest = prepare(args.data, c, "artifacts/storage")
-    end = int(len(frame) * c.train_fraction)
-    masks = split_masks(samples, end, int(len(frame) * (c.train_fraction + c.validation_fraction)))
-    if args.family == "arima":
-        model = ARIMAForecaster().fit(frame.log_return.iloc[1:end].to_numpy())
-        path = Path(args.output)
-        model.save(
-            path,
-            {
-                "order": model.order,
-                "selection": model.selection,
-                "dataset": manifest,
-                "fit_last_observation": str(frame.timestamp.iloc[end - 1]),
-                "horizon": c.horizon,
-                "trusted_artifact_only": True,
-            },
-        )
-        print(path)
-    else:
-        c = replace(c, family=args.family or c.family, task=args.task or c.task)
-        scaler, rows = fit_scaler(frame, columns, samples, masks[0], c.sequence_length)
-        x = transform(samples.x, scaler)
-        model = create_forecaster(len(columns), c).fit(
-            x[masks[0]], samples.y[masks[0]], x[masks[1]], samples.y[masks[1]]
-        )
-        bundle = save_bundle(
-            model, scaler, columns, manifest, split_metadata(frame, samples, masks, rows), args.artifacts
-        )
-        print(bundle)
-        import os
+    from .tracking import tracking_run
+    from .evaluation import evaluate
 
-        uri = args.mlflow_uri or os.getenv("MLFLOW_TRACKING_URI")
-        if uri:
-            import mlflow
-
-            mlflow.set_tracking_uri(uri)
-            with mlflow.start_run():
-                mlflow.log_params({**c.to_dict(), "dataset_version": manifest["dataset_version"]})
-                for epoch in model.history:
-                    mlflow.log_metrics(
-                        {"train_loss": epoch["train_loss"], "validation_loss": epoch["validation_loss"]},
-                        step=epoch["epoch"],
-                    )
-                mlflow.log_artifacts(str(bundle), "model")
+    c = replace(c, family=c.family if args.family == "arima" else args.family or c.family, task=args.task or c.task)
+    with tracking_run(c, "cli_training", args.mlflow_uri, args.mlflow_experiment, family=args.family) as tracking:
+        frame, columns, samples, manifest = prepare(args.data, c, "artifacts/storage")
+        end = int(len(frame) * c.train_fraction)
+        masks = split_masks(samples, end, int(len(frame) * (c.train_fraction + c.validation_fraction)))
+        tracking.dataset(manifest, split_metadata(frame, samples, masks, range(end)), columns)
+        if args.family == "arima":
+            model = ARIMAForecaster().fit(frame.log_return.iloc[1:end].to_numpy())
+            path = Path(args.output)
+            model.save(
+                path,
+                {
+                    "order": model.order,
+                    "selection": model.selection,
+                    "dataset": manifest,
+                    "fit_last_observation": str(frame.timestamp.iloc[end - 1]),
+                    "horizon": c.horizon,
+                    "trusted_artifact_only": True,
+                },
+            )
+            tracking.artifacts(path, "model")
+            tracking.params({"arima_order": model.order})
+            tracking.tags({"actual_device": "cpu"})
+            prediction = {
+                "return": model.rolling_predict(
+                    frame.log_return.to_numpy(), samples.origins[masks[1]], end - 1, c.horizon
+                ),
+                "probability": None,
+            }
+            tracking.metrics(evaluate(samples.y[masks[1]], prediction, samples.y[masks[0]]), "validation")
+            print(path)
+        else:
+            c = replace(c, family=args.family or c.family, task=args.task or c.task)
+            scaler, rows = fit_scaler(frame, columns, samples, masks[0], c.sequence_length)
+            x = transform(samples.x, scaler)
+            model = create_forecaster(len(columns), c).fit(
+                x[masks[0]], samples.y[masks[0]], x[masks[1]], samples.y[masks[1]]
+            )
+            bundle = save_bundle(
+                model, scaler, columns, manifest, split_metadata(frame, samples, masks, rows), args.artifacts
+            )
+            tracking.dataset(manifest, split_metadata(frame, samples, masks, rows), columns)
+            tracking.history(model.history)
+            tracking.tags({"actual_device": model.metadata()["device"]})
+            tracking.metrics(
+                evaluate(samples.y[masks[1]], model.predict(x[masks[1]]), samples.y[masks[0]]), "validation"
+            )
+            tracking.artifacts(bundle, "model")
+            print(bundle)
 
 
 if __name__ == "__main__":

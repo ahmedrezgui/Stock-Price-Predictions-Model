@@ -152,6 +152,7 @@ deployment/
 *.pt
 mlruns/
 mlflow.db
+mlflow.db-*
 .ruff_cache/
 reports/smoke/
 # Generated portfolio results are intentionally versionable.

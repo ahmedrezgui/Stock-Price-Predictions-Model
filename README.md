@@ -78,6 +78,81 @@ training a deployment candidate. The API exposes `/health`, `/ready`, `/models`
 and `/v1/predict`, with interactive documentation at `/docs`. Serving uses saved
 model bundles and frozen preprocessing, not the benchmark's in-memory predictions.
 
+## MLflow experiment tracking
+
+Install tracking once in the project environment:
+
+```powershell
+python -m pip install -e ".[dev,tracking]"
+```
+
+Run these commands from the repository root to track routine training locally:
+
+```powershell
+$env:MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
+$env:MLFLOW_EXPERIMENT_NAME = "stock-return-forecasting"
+python -m scripts.train_model --config configs/training.json --symbols BIAT
+python -m mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+```
+
+Open http://127.0.0.1:5000 and select `stock-return-forecasting`. The notebook uses
+this same database by default, with an absolute path so its working directory
+does not matter. The saved notebook was rerun with tracking enabled: the local
+database contains 90 benchmark runs (five stock parents and 85 model/baseline
+children), plus a routine BIAT training check. That candidate was correctly
+recorded as rejected by the existing baseline gate. Training verification used
+an isolated `artifacts/tracking-validation/` directory. These local tracking files
+are not committed; a fresh clone must rerun to create its own experiment history.
+
+Both command-line entry points accept `--mlflow-uri` and `--mlflow-experiment`.
+Explicit arguments take priority over environment variables. Python functions
+`benchmark_stock` and `train_candidate` accept `mlflow_uri` and
+`mlflow_experiment`. Outside the notebook, tracking is disabled when no URI is
+configured. An enabled but unavailable tracker raises an error; it does not
+silently discard evidence. For a shared tracking server, set the same variables
+to its URI and configure its authentication through MLflow's environment options.
+
+| Information | Where to find it |
+|---|---|
+| Model settings, seed, maximum epochs, feature version | Parameters |
+| Source CSV SHA-256 and normalized dataset version | Parameters and `metadata/dataset.json` |
+| Feature order, date boundaries and purge/scaler details | `metadata/inputs.json` |
+| Validation/test RMSE, MAE, direction and probability scores | Metrics such as `validation.regression.rmse` and `test.probability.brier` |
+| Per-epoch loss and learning rate | `training.*` metric history and `metadata/history.json` |
+| Git revision, dirty working tree, package versions | Tags and `metadata/environment.json` |
+| Benchmark report and figures | Stock run's `reports/` artifacts after the export cell |
+| Routine model weights, preprocessing and checksums | `models/<version>/` artifacts |
+| Candidate decision, baseline scores and refit policy | Tags and `metadata/candidate.json` |
+
+Each notebook stock run groups child runs for LSTM/GRU tasks and seeds, ARIMA,
+and the simple baselines. The full model configuration is recorded; neural-only
+settings do not apply to ARIMA or constant baselines. `actual_device` identifies
+the device used by fitted models. Benchmarking keeps its local output to one
+Markdown report and figures; MLflow JSON artifacts are created through temporary
+files. It does not save benchmark weights. A stock run can finish before figure
+export; `report_exported=true` confirms the export cell uploaded its artifacts.
+
+Routine training records validation scores without evaluating the research test
+holdout. A production refit stores both candidate and refit bundles; validation
+scores belong to the development candidate, not the refitted weights. An unchanged
+cached candidate creates a new run tagged `status=unchanged` and reuses the model
+version; its recorded history is the original training history, not a new fit.
+Tracking uploads happen before local promotion. Failed fits or uploads mark the
+run `FAILED`; rejected candidates are successful runs with `status=rejected`.
+
+Dataset versions use the same normalized-data/metadata hash in both workflows.
+Different history cutoffs legitimately produce different versions. Raw CSVs are
+not uploaded to MLflow; retain them through DVC/Blob storage to reproduce a run.
+Undefined metrics are omitted from numeric charts and retained as null in JSON.
+Metrics are logged explicitly using the [MLflow client API](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.client.html).
+
+`mlflow.db` and `mlruns/` stay out of Git. Keep both when backing up local tracking.
+The training workflow enables SQLite tracking and retains the database and
+artifacts with its GitHub Actions outputs; each job has a separate local store.
+This is not yet a shared hosted tracking service. Azure jobs use the tracking URI
+provided by Azure ML unless explicitly overridden; no cloud job was submitted
+as part of implementing this step.
+
 ## Validation and remaining work
 
 ```powershell

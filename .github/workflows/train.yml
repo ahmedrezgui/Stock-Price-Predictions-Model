@@ -28,7 +28,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install '.[dev]' 'dvc[azure]' azure-ai-ml azure-identity azure-storage-blob
+      - run: pip install '.[dev,tracking]' 'dvc[azure]' azure-ai-ml azure-identity azure-storage-blob
       - name: Core correctness before training
         run: pytest tests/forecasting tests/scripts/test_train_model.py -q
       - uses: azure/login@v1
@@ -44,6 +44,9 @@ jobs:
           key: forecast-state-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: forecast-state-${{ github.ref_name }}-
       - name: Train and evaluate on GitHub CPU runner
+        env:
+          MLFLOW_TRACKING_URI: sqlite:///mlflow.db
+          MLFLOW_EXPERIMENT_NAME: stock-return-forecasting
         run: python -m scripts.train_model --config configs/training.json --refit-production
       - uses: actions/cache/save@v4
         with:
@@ -60,4 +63,6 @@ jobs:
             artifacts/models
             reports/training
             data/raw
+            mlflow.db
+            mlruns
           retention-days: 30

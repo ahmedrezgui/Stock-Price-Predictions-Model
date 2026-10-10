@@ -15,11 +15,45 @@ from .data import fit_scaler, split_masks, transform, FEATURE_VERSION
 from .models import create_forecaster
 from .evaluation import evaluate
 from .registry import identity, promote
+from .tracking import tracking_run
 
 
 def train_candidate(
-    csv, config, root="artifacts/models", output="reports/training", force=False, refit_production=False
+    csv,
+    config,
+    root="artifacts/models",
+    output="reports/training",
+    force=False,
+    refit_production=False,
+    mlflow_uri=None,
+    mlflow_experiment=None,
 ):
+    with tracking_run(config, "training", mlflow_uri, mlflow_experiment) as tracking:
+        return _train_candidate(csv, config, root, output, force, refit_production, tracking)
+
+
+def log_candidate(tracking, result, root):
+    """Log evaluation before promotion; the refit is not a separately scored model."""
+    for version in dict.fromkeys((result["candidate_version"], result["model_version"])):
+        bundle = Path(root) / version
+        metadata = json.loads((bundle / "metadata.json").read_text(encoding="utf-8"))
+        tracking.artifacts(bundle, f"models/{version}")
+        if version == result["candidate_version"]:
+            tracking.dataset(metadata["dataset"], metadata["split"], metadata["feature_columns"])
+            tracking.history(metadata["model"]["history"])
+            tracking.tags({"actual_device": metadata["model"]["device"]})
+            tracking.metrics({"training_seconds": metadata["model"]["training_seconds"]}, "runtime")
+    tracking.metrics(result["validation_metrics"], "validation")
+    tracking.metrics(result.get("baseline_metrics", {}), "baseline.validation")
+    tracking.metrics({"objective": result["baseline_objective"]}, "baseline.validation")
+    tracking.metrics({"objective": result["validation_objective"]}, "validation")
+    tracking.tags(
+        {k: result[k] for k in ("status", "model_version", "candidate_version", "fit_policy", "holdout_used")}
+    )
+    tracking.document(result, "candidate.json")
+
+
+def _train_candidate(csv, config, root, output, force, refit_production, tracking):
     Path(root).mkdir(parents=True, exist_ok=True)
     try:
         with (Path(root) / "active.json").open("x", encoding="utf-8") as stream:
@@ -29,6 +63,13 @@ def train_candidate(
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     frame, columns, samples, manifest = prepare(csv, config, output / "storage")
+    tracking.params(
+        {
+            "dataset_version": manifest["dataset_version"],
+            "source_file_sha256": manifest["source_file_sha256"],
+            "refit_production": refit_production,
+        }
+    )
     implementation = b"".join(
         p.read_bytes()
         for folder in (Path(__file__).parent, Path(__file__).parents[1] / "src/prediction_model/models")
@@ -45,7 +86,14 @@ def train_candidate(
     if record.exists() and not force:
         result = json.loads(record.read_text(encoding="utf-8"))
         load_bundle(Path(root) / result["model_version"])
-        return {**result, "status": "unchanged"}
+        result = {
+            **result,
+            "status": "unchanged",
+            "reused_from_run_id": result.get("mlflow_run_id"),
+            "mlflow_run_id": tracking.run_id,
+        }
+        log_candidate(tracking, result, root)
+        return {**result, "mlflow_run_id": tracking.run_id}
     train, val, test = split_masks(
         samples,
         int(len(frame) * config.train_fraction),
@@ -73,6 +121,7 @@ def train_candidate(
         "validation_objective": score,
         "validation_metrics": evaluate(samples.y[val], prediction, samples.y[train]),
         "baseline_objective": baseline_score,
+        "baseline_metrics": evaluate(samples.y[val], baseline, samples.y[train]),
         "policy": "validation MSE or Brier <= train-only mean baseline",
         "fit_policy": "development_only_no_production_refit",
         "holdout_used": False,
@@ -103,6 +152,9 @@ def train_candidate(
             holdout_scored=False,
             selected_epochs=epochs,
         )
+    # Tracking errors must not silently promote an untracked candidate.
+    result["mlflow_run_id"] = tracking.run_id
+    log_candidate(tracking, result, root)
     if accepted:
         promote(root, bundle.name, identity(config))
     record.write_text(json.dumps(result, indent=2, allow_nan=False), encoding="utf-8")

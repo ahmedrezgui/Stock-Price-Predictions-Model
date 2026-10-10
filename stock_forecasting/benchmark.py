@@ -18,6 +18,7 @@ from .models import ARIMAForecaster, create_forecaster, naive_predictions
 from .reporting import make_reports, write_json
 from .statistics import statistical_analysis
 from .storage import LocalStore, snapshot
+from .tracking import tracking_run
 
 
 def prepare(csv, config, storage_root):
@@ -59,7 +60,13 @@ def run_benchmark(
     folds=2,
     artifacts="artifacts/models",
     mlflow_uri=None,
+    mlflow_experiment=None,
 ):
+    with tracking_run(config, "research_benchmark", mlflow_uri, mlflow_experiment) as tracking:
+        return _run_benchmark(csv, config, output, seeds, tasks, losses, folds, artifacts, tracking)
+
+
+def _run_benchmark(csv, config, output, seeds, tasks, losses, folds, artifacts, tracking):
     root = Path(output)
     root.mkdir(parents=True, exist_ok=False)
     (root / "curves").mkdir()
@@ -252,24 +259,27 @@ def run_benchmark(
     pd.concat(predictions, ignore_index=True).to_csv(root / "predictions.csv", index=False)
     write_json(root / "benchmark_summary.json", summary)
     make_reports(root)
-    if mlflow_uri:
-        import mlflow
+    tracking.dataset(manifest, summary["split"], columns)
+    tracking.params({"seeds": seeds, "tasks": tasks, "losses": losses, "folds": folds})
+    tracking.document(summary, "benchmark.json")
+    tracking.artifacts(root, "reports")
+    for name, entry in summary["models"].items():
+        setting = config
+        metadata = None
+        if entry.get("bundle"):
+            import json
 
-        mlflow.set_tracking_uri(mlflow_uri)
-        mlflow.set_experiment("stock-return-forecasting")
-        with mlflow.start_run():
-            mlflow.log_params(
-                {
-                    **config.to_dict(),
-                    "dataset_version": manifest["dataset_version"],
-                    "git_commit": summary["git_commit"],
-                }
-            )
-            for name, entry in summary["models"].items():
-                if "regression" in entry["metrics"]:
-                    mlflow.log_metric(f"{name}.rmse", entry["metrics"]["regression"]["rmse"])
-            mlflow.log_artifacts(str(root), "reports")
-            for entry in summary["models"].values():
-                if entry.get("bundle"):
-                    mlflow.log_artifacts(entry["bundle"], f"models/{Path(entry['bundle']).name}")
+            metadata = json.loads((Path(entry["bundle"]) / "metadata.json").read_text(encoding="utf-8"))
+            setting = Config(**metadata["model"]["config"])
+        with tracking_run(
+            setting, "research_benchmark_model", parent=tracking, name=name, family=None if metadata else name
+        ) as child:
+            child.dataset(manifest, summary["split"], columns)
+            child.metrics(entry["metrics"], "test")
+            child.document(entry, "evaluation.json")
+            if metadata:
+                child.history(metadata["model"]["history"])
+                child.tags({"actual_device": metadata["model"]["device"]})
+                child.artifacts(entry["bundle"], "model")
+    summary["mlflow_run_id"] = tracking.run_id
     return summary

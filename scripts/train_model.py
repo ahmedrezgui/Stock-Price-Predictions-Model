@@ -20,6 +20,8 @@ def main(argv=None):
     parser.add_argument("--artifacts", default="artifacts/models")
     parser.add_argument("--output", default="reports/training")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--mlflow-uri", help="Tracking URI; defaults to MLFLOW_TRACKING_URI")
+    parser.add_argument("--mlflow-experiment", help="Defaults to MLFLOW_EXPERIMENT_NAME or stock-return-forecasting")
     parser.add_argument(
         "--refit-production",
         action="store_true",
@@ -34,7 +36,9 @@ def main(argv=None):
             parser.error("Azure single-file training uses the symbol in --config")
         from stock_forecasting.azure import submit_training
 
-        job = submit_training(args.config, args.data, args.compute)
+        job = submit_training(
+            args.config, args.data, args.compute, mlflow_uri=args.mlflow_uri, mlflow_experiment=args.mlflow_experiment
+        )
         print(job.name)
         return
     if args.data and args.symbols and len(args.symbols) != 1:
@@ -56,6 +60,8 @@ def main(argv=None):
                 args.output,
                 args.force,
                 args.refit_production,
+                args.mlflow_uri,
+                args.mlflow_experiment,
             )
         except Exception as exc:
             failed = True

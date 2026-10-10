@@ -18,7 +18,7 @@ def ml_client():
     )
 
 
-def submit_training(config, dataset, compute, output="outputs"):
+def submit_training(config, dataset, compute, output="outputs", mlflow_uri=None, mlflow_experiment=None):
     from azure.ai.ml import Input, Output, command
     from azure.ai.ml.entities import CommandJobLimits, Environment
 
@@ -28,14 +28,20 @@ def submit_training(config, dataset, compute, output="outputs"):
         image="mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:latest",
         conda_file="infrastructure/azure/environment.yml",
     )
+    tracking_env = {}
+    if mlflow_uri:
+        tracking_env["MLFLOW_TRACKING_URI"] = mlflow_uri
+    if mlflow_experiment:
+        tracking_env["MLFLOW_EXPERIMENT_NAME"] = mlflow_experiment
     job = command(
         code=".",
         command=f"python -m scripts.train_model --data ${{{{inputs.data}}}} --config {shlex.quote(str(config))} --artifacts ${{{{outputs.models}}}} --output ${{{{outputs.models}}}}/reports --refit-production",
         inputs={"data": Input(type="uri_file", path=dataset)},
         outputs={"models": Output(type="uri_folder", mode="rw_mount")},
         environment=environment,
+        environment_variables=tracking_env,
         compute=compute,
-        experiment_name="stock-return-forecasting",
+        experiment_name=mlflow_experiment or "stock-return-forecasting",
         display_name="stock-return-training",
         limits=CommandJobLimits(timeout=3600),
     )

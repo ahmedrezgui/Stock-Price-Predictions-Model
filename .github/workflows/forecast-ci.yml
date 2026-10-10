@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install '.[dev]' azure-storage-blob azure-identity azure-ai-ml
+      - run: pip install '.[dev,tracking]' azure-storage-blob azure-identity azure-ai-ml
       - run: ruff check stock_forecasting tests/forecasting infrastructure/azure/score.py
       - run: ruff format --check stock_forecasting tests/forecasting infrastructure/azure/score.py
       - run: pytest tests/forecasting tests/scripts/test_train_model.py --cov=stock_forecasting --cov-report=term-missing

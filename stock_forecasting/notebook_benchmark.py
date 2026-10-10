@@ -15,12 +15,16 @@ from .backtesting import backtest
 from .benchmark import split_metadata
 from .data import features, fit_scaler, normalize, read_csv, sequences, split_masks, targets, transform
 from .evaluation import evaluate
+from .storage import snapshot_identity
+from .tracking import tracking_run
 from .models import ARIMAForecaster, create_forecaster, naive_predictions
 
 
 def prepare_stock(path, config, validation_start="2022-01-01", test_start="2024-01-01"):
     """All stocks share date boundaries; training/scaling use no validation or test rows."""
     frame, quality = normalize(read_csv(path), config)
+    quality["source_file_sha256"] = sha256(Path(path).read_bytes()).hexdigest()
+    manifest, _ = snapshot_identity(frame, quality)
     frame, columns = features(frame, config.feature_groups)
     frame = targets(frame, config.horizon)
     samples = sequences(frame, columns, config.sequence_length, config.horizon)
@@ -36,6 +40,7 @@ def prepare_stock(path, config, validation_start="2022-01-01", test_start="2024-
         "masks": masks,
         "x": transform(samples.x, scaler),
         "quality": quality,
+        "manifest": manifest,
         "split": split_metadata(frame, samples, masks, rows),
         "train_end": train_end,
         "source_sha256": sha256(Path(path).read_bytes()).hexdigest(),
@@ -44,7 +49,20 @@ def prepare_stock(path, config, validation_start="2022-01-01", test_start="2024-
     }
 
 
-def benchmark_stock(data, seeds=(7, 19, 43)):
+def benchmark_stock(data, seeds=(7, 19, 43), mlflow_uri=None, mlflow_experiment=None):
+    with tracking_run(data["config"], "benchmark", mlflow_uri, mlflow_experiment) as tracking:
+        tracking.dataset(data["manifest"], data["split"], data["columns"])
+        tracking.params(
+            {"seeds": seeds, "validation_start": data["validation_start"], "test_start": data["test_start"]}
+        )
+        tracking.tags({"report_exported": "false"})
+        result = _benchmark_stock(data, seeds, tracking)
+        result["tracking"] = tracking
+        tracking.document(result["budgets"].to_dict(orient="records"), "budgets.json")
+        return result
+
+
+def _benchmark_stock(data, seeds, tracking):
     """Fit each family/task/seed once. Evaluate validation and test separately.
 
     Hyperparameters are fixed in advance; validation picks epochs. Test rankings
@@ -59,8 +77,13 @@ def benchmark_stock(data, seeds=(7, 19, 43)):
     x = data["x"]
     rows, displayed, histories, budgets = [], {}, {}, []
 
-    def record(name, phase, mask, prediction, seed=None, seconds=None, latency=None):
+    def record(name, phase, mask, prediction, seed=None, seconds=None, latency=None, run=None):
+        current_run = run or tracking
         scores = evaluate(samples.y[mask], prediction, samples.y[train])
+        prefix = phase if run is not None else f"{name}.{phase}"
+        current_run.metrics(scores, prefix)
+        current_run.metrics({"training_seconds": seconds, "prediction_ms_per_sample": latency}, "runtime")
+        current_run.document(scores, f"{name}-{phase}-metrics.json")
         rows.append(
             {
                 "symbol": c.symbol,
@@ -80,60 +103,85 @@ def benchmark_stock(data, seeds=(7, 19, 43)):
         if phase == "test" and (seed is None or seed == seeds[0]):
             displayed[name] = {"prediction": prediction, "metrics": scores}
 
-    for phase, mask in (("validation", val), ("test", test)):
-        for name, pred in naive_predictions(samples.y[train], int(mask.sum())).items():
-            record(name, phase, mask, pred)
+    for name in naive_predictions(samples.y[train], int(test.sum())):
+        with tracking_run(c, "benchmark_baseline", parent=tracking, name=f"{c.symbol}-{name}", family=name) as baseline:
+            baseline.dataset(data["manifest"], data["split"], data["columns"])
+            for phase, mask in (("validation", val), ("test", test)):
+                pred = naive_predictions(samples.y[train], int(mask.sum()))[name]
+                record(name, phase, mask, pred, run=baseline)
     print(f"{c.symbol}: fitting ARIMA on CPU", flush=True)
-    arima = ARIMAForecaster().fit(frame.log_return.iloc[1 : data["train_end"]].to_numpy())
-    for phase, mask in (("validation", val), ("test", test)):
-        start = time.perf_counter()
-        forecast = arima.rolling_predict(
-            frame.log_return.to_numpy(), samples.origins[mask], data["train_end"] - 1, c.horizon
-        )
-        record(
-            "ARIMA",
-            phase,
-            mask,
-            {"return": forecast, "probability": None},
-            seconds=arima.training_seconds,
-            latency=(time.perf_counter() - start) * 1000 / mask.sum(),
-        )
+    with tracking_run(c, "benchmark_baseline", parent=tracking, name=f"{c.symbol}-ARIMA", family="arima") as baseline:
+        baseline.dataset(data["manifest"], data["split"], data["columns"])
+        arima = ARIMAForecaster().fit(frame.log_return.iloc[1 : data["train_end"]].to_numpy())
+        baseline.params({"arima_order": arima.order})
+        baseline.tags({"actual_device": "cpu"})
+        baseline.document(arima.selection, "arima_selection.json")
+        for phase, mask in (("validation", val), ("test", test)):
+            start = time.perf_counter()
+            forecast = arima.rolling_predict(
+                frame.log_return.to_numpy(), samples.origins[mask], data["train_end"] - 1, c.horizon
+            )
+            record(
+                "ARIMA",
+                phase,
+                mask,
+                {"return": forecast, "probability": None},
+                seconds=arima.training_seconds,
+                latency=(time.perf_counter() - start) * 1000 / mask.sum(),
+                run=baseline,
+            )
     for task in ("return", "direction"):
         for family in ("lstm", "gru"):
             name = f"{family.upper()}_{task}"
             for seed in seeds:
                 setting = replace(c, family=family, task=task, seed=seed)
-                model = create_forecaster(len(data["columns"]), setting)
-                model.fit(x[train], samples.y[train], x[val], samples.y[val])
-                meta = model.metadata()
-                histories[(name, seed)] = model.history
-                best_epoch = min(model.history, key=lambda row: row["validation_loss"])["epoch"]
-                budgets.append(
-                    {
-                        "model": name,
-                        "seed": seed,
-                        "epochs_run": len(model.history),
-                        "best_epoch": best_epoch,
-                        "device": meta["device"],
-                        "seconds": meta["training_seconds"],
-                    }
-                )
-                for phase, mask in (("validation", val), ("test", test)):
-                    model.predict(x[mask][:1])  # Warmup is not included in measured latency.
-                    if c.device == "cuda":
-                        torch.cuda.synchronize()
-                    start = time.perf_counter()
-                    prediction = model.predict(x[mask])
-                    if c.device == "cuda":
-                        torch.cuda.synchronize()
-                    elapsed = time.perf_counter() - start
-                    record(name, phase, mask, prediction, seed, meta["training_seconds"], elapsed * 1000 / mask.sum())
-                print(
-                    f"{c.symbol}: {name}, seed {seed}, {len(model.history)}/{c.epochs} epochs, "
-                    f"best {best_epoch}, {meta['training_seconds']:.1f}s on {meta['device']}",
-                    flush=True,
-                )
-                del model
+                with tracking_run(
+                    setting, "benchmark_model", parent=tracking, name=f"{c.symbol}-{name}-seed{seed}"
+                ) as current_run:
+                    current_run.dataset(data["manifest"], data["split"], data["columns"])
+                    model = create_forecaster(len(data["columns"]), setting)
+                    model.fit(x[train], samples.y[train], x[val], samples.y[val])
+                    meta = model.metadata()
+                    current_run.tags({"actual_device": meta["device"]})
+                    current_run.document(meta, "model.json")
+                    histories[(name, seed)] = model.history
+                    best_epoch = min(model.history, key=lambda row: row["validation_loss"])["epoch"]
+                    budgets.append(
+                        {
+                            "model": name,
+                            "seed": seed,
+                            "epochs_run": len(model.history),
+                            "best_epoch": best_epoch,
+                            "device": meta["device"],
+                            "seconds": meta["training_seconds"],
+                        }
+                    )
+                    for phase, mask in (("validation", val), ("test", test)):
+                        model.predict(x[mask][:1])  # Warmup is not included in measured latency.
+                        if c.device == "cuda":
+                            torch.cuda.synchronize()
+                        start = time.perf_counter()
+                        prediction = model.predict(x[mask])
+                        if c.device == "cuda":
+                            torch.cuda.synchronize()
+                        elapsed = time.perf_counter() - start
+                        record(
+                            name,
+                            phase,
+                            mask,
+                            prediction,
+                            seed,
+                            meta["training_seconds"],
+                            elapsed * 1000 / mask.sum(),
+                            current_run,
+                        )
+                    print(
+                        f"{c.symbol}: {name}, seed {seed}, {len(model.history)}/{c.epochs} epochs, "
+                        f"best {best_epoch}, {meta['training_seconds']:.1f}s on {meta['device']}",
+                        flush=True,
+                    )
+                    del model
+                    current_run.history(histories[(name, seed)])
     strategies = {}
     for name, entry in displayed.items():
         pred = entry["prediction"]
@@ -367,6 +415,18 @@ def stock_figures(result, directory):
 
 
 def export_benchmark(results, output):
+    try:
+        return _export_benchmark(results, output)
+    except BaseException:
+        for result in results.values():
+            tracking = result.get("tracking")
+            if tracking and tracking.client:
+                tracking.tags({"report_exported": "failed"})
+                tracking.client.set_terminated(tracking.run_id, "FAILED")
+        raise
+
+
+def _export_benchmark(results, output):
     """Write one Markdown report and grouped PNG figures; no CSV/JSON/model files."""
     output = Path(output)
     (output / "figures").mkdir(parents=True, exist_ok=True)
@@ -506,4 +566,14 @@ def export_benchmark(results, output):
     ]
     report = output / "benchmark_report.md"
     report.write_text("\n".join(lines), encoding="utf-8")
+    for result in results.values():
+        tracking = result.get("tracking")
+        if tracking:
+            tracking.tags({"report_exported": "false"})
+            tracking.artifacts(report, "reports")
+            # Keep every relative figure link in the uploaded report valid.
+            tracking.artifacts(output / "figures", "reports/figures")
+            tracking.tags({"report_exported": "true"})
+            if tracking.client:
+                tracking.client.set_terminated(tracking.run_id, "FINISHED")
     return report
