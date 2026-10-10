@@ -1,4 +1,4 @@
-"""Routine candidate training; development validation gates local promotion.
+"""Routine candidate training; development validation never grants deployment approval.
 
 The final research holdout is neither scored nor used to train this candidate.
 Optional production refit retires the historical holdout after freezing selection.
@@ -14,7 +14,7 @@ from .benchmark import prepare, split_metadata, objective
 from .data import fit_scaler, split_masks, transform, FEATURE_VERSION
 from .models import create_forecaster
 from .evaluation import evaluate
-from .registry import identity, promote
+from .registry import identity
 from .tracking import tracking_run
 
 
@@ -29,11 +29,18 @@ def train_candidate(
     mlflow_experiment=None,
 ):
     with tracking_run(config, "training", mlflow_uri, mlflow_experiment) as tracking:
-        return _train_candidate(csv, config, root, output, force, refit_production, tracking)
+        result = _train_candidate(csv, config, root, output, force, refit_production, tracking)
+    if tracking.client:
+        from .model_registry import register_candidate
+
+        result["registered_model"] = register_candidate(
+            tracking.client, tracking.run_id, Path(root) / result["model_version"]
+        )
+    return result
 
 
 def log_candidate(tracking, result, root):
-    """Log evaluation before promotion; the refit is not a separately scored model."""
+    """Log candidate evidence; the refit is not a separately scored model."""
     for version in dict.fromkeys((result["candidate_version"], result["model_version"])):
         bundle = Path(root) / version
         metadata = json.loads((bundle / "metadata.json").read_text(encoding="utf-8"))
@@ -114,7 +121,7 @@ def _train_candidate(csv, config, root, output, force, refit_production, trackin
     )
     load_bundle(bundle)
     result = {
-        "status": "promoted" if accepted else "rejected",
+        "status": "candidate" if accepted else "rejected",
         "model_version": bundle.name,
         "fingerprint": fingerprint,
         "identity": identity(config),
@@ -152,10 +159,8 @@ def _train_candidate(csv, config, root, output, force, refit_production, trackin
             holdout_scored=False,
             selected_epochs=epochs,
         )
-    # Tracking errors must not silently promote an untracked candidate.
+    # Persist evidence before making the candidate available for registration.
     result["mlflow_run_id"] = tracking.run_id
     log_candidate(tracking, result, root)
-    if accepted:
-        promote(root, bundle.name, identity(config))
     record.write_text(json.dumps(result, indent=2, allow_nan=False), encoding="utf-8")
     return result

@@ -45,9 +45,10 @@ jobs:
           restore-keys: forecast-state-${{ github.ref_name }}-
       - name: Train and evaluate on GitHub CPU runner
         env:
-          MLFLOW_TRACKING_URI: sqlite:///mlflow.db
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI || 'sqlite:///mlflow.db' }}
+          MLFLOW_TRACKING_TOKEN: ${{ secrets.MLFLOW_TRACKING_TOKEN }}
           MLFLOW_EXPERIMENT_NAME: stock-return-forecasting
-        run: python -m scripts.train_model --config configs/training.json --refit-production
+        run: python -m scripts.train_model --config configs/training.json
       - uses: actions/cache/save@v4
         with:
           path: |

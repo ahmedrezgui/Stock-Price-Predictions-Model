@@ -137,7 +137,7 @@ holdout. A production refit stores both candidate and refit bundles; validation
 scores belong to the development candidate, not the refitted weights. An unchanged
 cached candidate creates a new run tagged `status=unchanged` and reuses the model
 version; its recorded history is the original training history, not a new fit.
-Tracking uploads happen before local promotion. Failed fits or uploads mark the
+Training never changes the active serving model. Tracking uploads precede registry registration. Failed fits or uploads mark the
 run `FAILED`; rejected candidates are successful runs with `status=rejected`.
 
 Dataset versions use the same normalized-data/metadata hash in both workflows.
@@ -147,11 +147,144 @@ Undefined metrics are omitted from numeric charts and retained as null in JSON.
 Metrics are logged explicitly using the [MLflow client API](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.client.html).
 
 `mlflow.db` and `mlruns/` stay out of Git. Keep both when backing up local tracking.
-The training workflow enables SQLite tracking and retains the database and
-artifacts with its GitHub Actions outputs; each job has a separate local store.
+The training workflow uses the shared `MLFLOW_TRACKING_URI` repository variable
+when configured, otherwise SQLite, and retains its local evidence in GitHub
+Actions outputs. SQLite jobs have separate local stores.
 This is not yet a shared hosted tracking service. Azure jobs use the tracking URI
 provided by Azure ML unless explicitly overridden; no cloud job was submitted
 as part of implementing this step.
+
+## Deployment protection and Model Registry (BIAT)
+
+BIAT is the first supported release target, for one-observation-ahead return
+forecasts. Its long history makes it suitable for building this workflow; it does
+not establish that LSTM is best. The existing benchmark MLflow runs contain
+scores and figures, **not serving weights**. Routine training now registers its
+verified custom model bundles under `stock-BIAT-return-h1`. These bundles use
+our existing loader/API; they are not MLflow pyfunc serving packages.
+
+The registry distinguishes two aliases:
+
+- `candidate`: the latest registered candidate, including its development status.
+- `deployed`: set only after deployment verification confirms the exact model is
+  answering requests. Training and successful evaluations never set this alias.
+
+Training no longer promotes models into `active.json`. Development validation
+returns `candidate` or `rejected`; a release decision requires separate evidence.
+Rejected development candidates remain registered for audit and may be evaluated
+prospectively; registration alone is never approval. Repeated cached training
+reuses the same registry version so it does not reset the registration cutoff.
+Local `registry.promote` remains a development/testing utility and cannot bypass
+release packaging's MLflow check.
+
+### Frozen release policy
+
+The reviewable rules live in [configs/release_policy.json](configs/release_policy.json).
+The default policy is:
+
+| Requirement | Replacement release | First deployment (`--bootstrap`) |
+|---|---|---|
+| Eligible observations | At least 120 paired outcomes | At least 120 matured outcomes |
+| RMSE | At least 1% better than deployed | At least 1% better than frozen mean baseline |
+| MAE | No worse than deployed | No worse than frozen mean baseline |
+| Mean baseline | Must also beat it | Used as the comparator |
+| Input freshness | Latest completed observation within 14 days | Same |
+| Approval lifetime | 24 hours | Same |
+
+Both models use **the exact same origins and outcomes**, with their own frozen
+features and scalers. No fitting occurs during comparison. The baseline is the
+candidate's saved training-target mean, never a mean fitted on evaluation data.
+Changing architectures is allowed; changing symbol, horizon, task, adjustment
+basis or calendar definitions is blocked.
+
+Eligible origins must be later than every model's training-label and
+validation-label cutoffs, bundle creation time, registry registration time, and
+policy freeze time. Current-day data and immature labels are excluded. This
+conservative prospective rule also excludes the already-inspected benchmark.
+Missing dates are not manufactured; the horizon still counts observed bars.
+The 120-observation rule is an operational minimum, not statistical proof of
+superiority or trading profitability.
+
+**There is currently no deployed model.** Normal replacement evaluations must
+block. Bootstrap is explicit and still requires fresh evidence; it does not
+create a pretend deployed model or waive thresholds. Local verification registered BIAT version 1 and
+confirmed that both replacement and bootstrap checks block with zero eligible
+observations; no deployed alias was assigned. A newly registered model
+cannot pass using historical benchmark outcomes. Freeze the candidate and wait
+for at least 120 eligible new observations. Registering a newly trained version
+starts its own prospective evidence period.
+
+Automatic training jobs no longer use `--refit-production`. An explicit refit
+remains available, but all labels it uses become ineligible for release evaluation.
+Never refit approved weights before release: the approval pins their checksums.
+
+### Local use
+
+Activate the project environment and run from the repository root:
+
+```powershell
+$env:MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
+python -m scripts.train_model --config configs/training.json --symbols BIAT
+python -m mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+Open MLflow's **Models** page, select `stock-BIAT-return-h1`, and note the exact
+numeric candidate version. The following uses version 1 as an example:
+
+```powershell
+python -m stock_forecasting.release_gate --mlflow-uri sqlite:///mlflow.db --name stock-BIAT-return-h1 --version 1 --data data/raw/BIAT.csv --bootstrap
+```
+
+A blocked decision exits with code 1 and records the reasons in a `release_gate`
+MLflow run. Its artifacts include `metadata/gate.json`; scored comparisons also
+include `metadata/paired_predictions.json`. The run records the policy hash,
+model checksums, source CSV checksum, eligible dates/count, metrics and expiry.
+Artifact integrity is checked against an immutable MLflow run parameter. An
+unreachable registry or service, invalid predictions, insufficient evidence,
+corrupt bundles, or missing provenance blocks release.
+
+Only after a passing gate, use its run ID to package the exact approved bundle:
+
+```powershell
+python -m stock_forecasting.release --mlflow-uri sqlite:///mlflow.db --gate-run-id <GATE_RUN_ID> --data data/raw --output deployment
+```
+
+Packaging fetches evidence from MLflow, rejects superseded/expired gates, verifies
+that the policy, source CSV, candidate and deployed version have not changed,
+and includes only the approved model. A hand-edited local approval JSON or local
+active-model entry is insufficient. Output directories must be new.
+
+### Later Azure deployment
+
+The release workflow now evaluates before packaging, image publication and Azure
+changes. It takes an exact candidate registry version, a workflow run containing
+fresh CSV data, and an explicit bootstrap flag. It rechecks approval immediately
+before deployment and confirms the model served by `/v1/predict` before assigning
+`deployed`. Subsequent gates check the deployed endpoint as well as registry
+lineage. `FORECAST_API_KEY` supplies the API key; it is not stored in gate artifacts.
+
+Release jobs require a **shared** MLflow service configured with the repository
+variable `MLFLOW_TRACKING_URI` and, where needed, secret `MLFLOW_TRACKING_TOKEN`.
+A laptop SQLite database is not a shared registry for GitHub runners. Configure
+artifact storage and authentication for your chosen MLflow host in the Azure
+setup stage. The current workflow targets the existing App Service container
+path; Azure ML managed endpoints will need their corresponding deployment adapter.
+The older direct Azure ML `deploy` command is disabled so it cannot bypass this
+gate. The legacy frontend/backend web workflow is a separate application, not the
+forecasting-service release route.
+No Azure resource or live deployment is created by the local implementation.
+
+Keep all deployment writers in the workflow's single concurrency group and use
+protected branches plus the `azure-approved` environment. MLflow alias updates
+are not atomic compare-and-swap operations; administrators must not edit aliases
+or artifacts during a release. Restrict registry/artifact writes to trusted
+identities. This gate protects the release path, not against an administrator
+who rewrites both the registry and CI rules. If deployment succeeds but endpoint
+verification or alias recording fails, the workflow fails and later releases
+block until the actual serving state is reconciled; automatic Azure rollback is
+not implemented in this step.
+
+Registry operations use the [MLflow Model Registry API](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.client.html).
 
 ## Validation and remaining work
 
@@ -165,8 +298,7 @@ calendars. Horizons count observed bars. Strategy plots include simplified costs
 and execution assumptions and do not establish trading profitability. Previously
 inspected historical test periods are retrospective evidence.
 
-Azure integration, candidate promotion and monitoring are separate from this
-benchmark milestone. A successful benchmark is not proof of a verified live Azure
+Live Azure deployment and ongoing performance monitoring remain subsequent steps. A successful benchmark is not proof of a verified live Azure
 deployment or performance-monitoring service. The `docs/` directory contains local
 project guides and is intentionally excluded from Git; it is absent from a fresh
 clone. The existing research CLI and ETL dependencies remain available.

@@ -1,4 +1,5 @@
 from hashlib import sha256
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import platform
@@ -32,6 +33,7 @@ def save_bundle(model: NeuralForecaster, scaler, columns, manifest, split, root:
     torch.save({k: v.cpu() for k, v in model.network.state_dict().items()}, path / "weights.pt")
     metadata = {
         "schema_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "model_version": version,
         "feature_version": FEATURE_VERSION,
         "feature_columns": columns,

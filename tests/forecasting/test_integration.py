@@ -35,7 +35,10 @@ def test_candidate_rejection_skip_refit_and_rollback(bars, tmp_path, monkeypatch
     assert train_candidate(data, c, root, output)["status"] == "unchanged"
     scores = iter([0.0, 1.0])
     accepted = train_candidate(data, c, root, output, force=True, refit_production=True)
-    assert accepted["status"] == "promoted"
+    assert accepted["status"] == "candidate"
+    assert read_registry(root)["active"] == {}
+    # Explicit activation below tests the local API, not permission to release.
+    promote(root, accepted["model_version"])
     model, _, meta = load_bundle(root / accepted["model_version"])
     assert isinstance(model, LSTMModel)
     assert meta["split"]["production_refit"]
@@ -53,12 +56,12 @@ def test_candidate_rejection_skip_refit_and_rollback(bars, tmp_path, monkeypatch
         assert response.json()["forecast_for"] is None
     from stock_forecasting.release import package_release
 
-    release = package_release(root, tmp_path, tmp_path / "release")
-    assert (release / "models" / accepted["model_version"] / "weights.pt").is_file()
-    assert not (release / "models" / rejected["model_version"]).exists()
+    with pytest.raises(ValueError, match="release gate"):
+        package_release(tmp_path, tmp_path / "release")
     first = accepted["model_version"]
     scores = iter([0.0, 1.0])
     second = train_candidate(data, c, root, output, force=True, refit_production=True)
+    promote(root, second["model_version"])
     assert read_registry(root)["active"][identity(c)] == second["model_version"]
     rollback(root, identity(c))
     assert read_registry(root)["active"][identity(c)] == first

@@ -35,7 +35,7 @@ def submit_training(config, dataset, compute, output="outputs", mlflow_uri=None,
         tracking_env["MLFLOW_EXPERIMENT_NAME"] = mlflow_experiment
     job = command(
         code=".",
-        command=f"python -m scripts.train_model --data ${{{{inputs.data}}}} --config {shlex.quote(str(config))} --artifacts ${{{{outputs.models}}}} --output ${{{{outputs.models}}}}/reports --refit-production",
+        command=f"python -m scripts.train_model --data ${{{{inputs.data}}}} --config {shlex.quote(str(config))} --artifacts ${{{{outputs.models}}}} --output ${{{{outputs.models}}}}/reports",
         inputs={"data": Input(type="uri_file", path=dataset)},
         outputs={"models": Output(type="uri_folder", mode="rw_mount")},
         environment=environment,
@@ -65,29 +65,12 @@ def register_bundle(path, name):
 
 
 def deploy(endpoint_name, model_id, image, instance_type):
-    from azure.ai.ml.entities import CodeConfiguration, Environment, ManagedOnlineDeployment, ManagedOnlineEndpoint
-
-    client = ml_client()
-    endpoint = ManagedOnlineEndpoint(name=endpoint_name, auth_mode="aad_token", tags={"project": "stock-forecasting"})
-    client.online_endpoints.begin_create_or_update(endpoint).result()
-    deployment = ManagedOnlineDeployment(
-        name="candidate",
-        endpoint_name=endpoint_name,
-        model=model_id,
-        environment=Environment(
-            image=image,
-            inference_config={
-                "liveness_route": {"port": 5001, "path": "/"},
-                "readiness_route": {"port": 5001, "path": "/"},
-                "scoring_route": {"port": 5001, "path": "/score"},
-            },
-        ),
-        code_configuration=CodeConfiguration(code="infrastructure/azure", scoring_script="score.py"),
-        instance_type=instance_type,
-        instance_count=1,
+    # This older path could update a deployment without binding its weights to a gate.
+    # Keep it closed until the Azure ML managed-endpoint adapter verifies that binding.
+    raise ValueError(
+        "Direct Azure ML deployment is disabled: use the gated forecast-release workflow "
+        "for App Service. A gate-aware Azure ML managed-endpoint adapter is required."
     )
-    # New candidate receives no live traffic. Traffic promotion is a separate reviewed command.
-    return client.online_deployments.begin_create_or_update(deployment).result()
 
 
 def main():
