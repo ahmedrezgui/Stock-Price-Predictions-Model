@@ -73,6 +73,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Personal documentation stays local.
+/docs/
+
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
 

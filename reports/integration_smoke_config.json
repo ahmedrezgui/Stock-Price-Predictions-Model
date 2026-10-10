@@ -1,1 +1,0 @@
-{"symbol": "BIAT", "horizon": 1, "sequence_length": 20, "feature_groups": ["price", "volatility"], "hidden_size": 32, "epochs": 2, "patience": 5, "adjustment": "unverified", "as_of": null, "start": "2018-01-01", "end": null, "device": "cpu"}
