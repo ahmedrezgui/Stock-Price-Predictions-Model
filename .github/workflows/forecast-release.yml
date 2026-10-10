@@ -110,10 +110,12 @@ jobs:
           RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
           APP_NAME: ${{ secrets.AZURE_FORECAST_APP_NAME }}
           REPOSITORY: ${{ vars.FORECAST_IMAGE_REPOSITORY }}
+          MONITOR_DB: ${{ vars.FORECAST_MONITOR_DB }}
         run: |
           test -n "$APP_NAME"
           test -n "$FORECAST_API_KEY"
-          az webapp config appsettings set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --settings FORECAST_ENV=production FORECAST_API_KEY="$FORECAST_API_KEY" --output none
+          test -n "$MONITOR_DB"
+          az webapp config appsettings set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --settings FORECAST_ENV=production FORECAST_API_KEY="$FORECAST_API_KEY" FORECAST_MONITOR_DB="$MONITOR_DB" --output none
           az webapp config container set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --docker-custom-image-name "$REPOSITORY:$IMAGE_TAG" --docker-registry-server-url https://index.docker.io
           az webapp restart --name "$APP_NAME" --resource-group "$RESOURCE_GROUP"
       - name: Verify served version before updating deployed alias

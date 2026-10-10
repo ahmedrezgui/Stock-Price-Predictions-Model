@@ -286,6 +286,125 @@ not implemented in this step.
 
 Registry operations use the [MLflow Model Registry API](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.client.html).
 
+## Step 4: prediction monitoring
+
+The API now saves each issued forecast before returning it and includes a
+`forecast_id` in the response. The Azure scoring adapter uses the same store.
+SQLite keeps the forecast, model version, stock, task, horizon, original close,
+input/training dataset versions and issue time. No additional database server is
+needed locally. Repeating the same forecast returns the same ID and does not
+increase its weight in the metrics. Conflicting inputs or predictions for that
+same model version and origin are rejected; investigate the source revision.
+If recording fails, the API returns 503 instead of an unrecorded forecast.
+Direct research calls to `predict_bundle` are not recorded unless `monitor_path`
+is provided; benchmark predictions are not retroactively treated as live forecasts.
+
+### Run locally
+
+Use the same database path for serving and monitoring. From the repository root,
+with the virtual environment activated, set this in **both** terminals:
+
+```powershell
+$env:FORECAST_MONITOR_DB = "$env:LOCALAPPDATA\StockForecast\forecasts.sqlite3"
+```
+
+This keeps the active database outside the project's OneDrive folder. Without
+the setting, the default API stores it in `artifacts/monitoring/forecasts.sqlite3`.
+Custom model roots use a sibling `monitoring` folder, so use an explicit path
+when running the monitoring command against a custom API installation.
+
+Start your existing API and request predictions as usual:
+
+```powershell
+python -m uvicorn stock_forecasting.api:app --host 127.0.0.1 --port 8000
+```
+
+After refreshing the raw CSV files, reconcile outcomes and update the report:
+
+```powershell
+python -m stock_forecasting.monitoring --data data/raw --window 30 --min-observations 20 --mlflow-uri sqlite:///mlflow.db
+```
+
+There is one report: `reports/monitoring/monitoring_report.md`, overwritten each
+run. The database and generated report are ignored by Git. Without `--mlflow-uri`
+or `MLFLOW_TRACKING_URI`, local monitoring still works. When enabled, MLflow gets
+one `prediction_monitoring` run per model identity, with rolling metric history,
+counts, exact matched forecasts/outcomes and dataset versions in
+`metadata/monitoring.json`, plus the Markdown report. It does not create new model
+versions or change registry aliases.
+
+Forecast capture is automatic; reconciliation runs when this command runs.
+Schedule it daily **after the CSV refresh** on the machine owning the database.
+For Windows Task Scheduler, use the full path to `.venv\Scripts\python.exe` as
+the program, set this repository as **Start in**, and use these arguments
+(replace the database path with your actual absolute path):
+
+```text
+-m stock_forecasting.monitoring --database C:\Users\rezgu\AppData\Local\StockForecast\forecasts.sqlite3 --data data/raw --mlflow-uri sqlite:///mlflow.db
+```
+
+No scheduled task or cloud resource is installed automatically. A GitHub runner
+cannot read your laptop's forecast database. Refresh CSVs atomically (write a
+temporary file, then replace the destination) to avoid readers seeing partial
+downloads. Configure the scheduler to prevent overlapping reconciliation jobs.
+
+### Matching rules and metrics
+
+Only completed daily observations are used; the current UTC date is excluded,
+as in training and inference. An unverified horizon of 5 means the fifth observed
+bar after the forecast origin, not five calendar days. Verified session forecasts
+also require the target date saved at issue time. No missing day is filled.
+The actual return is `log(target_close / origin_close)` using the forecast's
+original price-adjustment policy.
+
+Outcomes stay pending until enough completed bars exist. Missing sources,
+revised origin prices, revised matched outcomes, calendar mismatches and outcomes
+dated before issuance are excluded and explained in the report. Matched outcomes
+are rechecked on subsequent runs; original evidence is preserved. The command
+exits with code 1 for data issues, so a scheduler can surface failures. Pending
+outcomes and a short evaluation window are normal states, not command failures.
+
+| Metric | Meaning |
+| --- | --- |
+| RMSE | Typical log-return error, with greater weight on large errors; lower is better. |
+| MAE | Average absolute log-return error; lower is better. |
+| Bias | Average predicted minus actual return; positive means overprediction. |
+| Zero-return RMSE | Error of always predicting no price change, over the same window. |
+| Direction accuracy | Fraction predicting the correct positive versus nonpositive return. |
+| Brier score | Average squared error of the probability of an up move; lower is better. Only available for probability outputs. |
+| n / sufficient_evidence | Matched origins in the window; defaults to needing 20 of the last 30. This is a descriptive reporting minimum, not the release gate's evidence threshold. |
+
+Each stock, exact model version, task, horizon and price basis has its own rolling
+window. Direction-only models have no return-error metrics. Zero actual return
+counts as nonpositive. Returns are dimensionless natural-log returns, not price
+errors or percentage-point errors. Longer overlapping horizons produce correlated
+errors; their observation count does not imply independent samples.
+
+Daily CSV dates cannot prove that same-day issuance preceded the market close.
+These cases are counted as `same_day_issue_n`; monitoring is daily-bar error
+tracking, not verified intraday trading performance. Unverified observed-bar
+horizons also cannot detect a missing exchange session. The report shows the
+latest outcome date: rerunning it with stale CSVs does not produce fresh evidence.
+Monitoring does not replace or automatically relax step 3's release protection.
+
+### Storage for later deployment
+
+Production serving requires an explicit `FORECAST_MONITOR_DB` path. The release
+workflow passes the repository variable of that name to the service; setting a
+path alone does not provision durable storage. The current store supports one
+host with a durable local disk and concurrent local processes. Keep backups using
+SQLite's backup facility or copy the file while all writers are stopped.
+
+Do not place the active SQLite database on a shared network filesystem; see
+[SQLite's network filesystem guidance](https://www.sqlite.org/useovernet.html).
+Azure App Service and Azure ML deployment need a suitable persistent monitoring
+store and scheduled reconciliation connected to refreshed data before launch.
+Their container writable layer is not a durable deployment solution; see
+[Azure container storage configuration](https://learn.microsoft.com/en-us/azure/app-service/configure-custom-container).
+For those managed services or multiple replicas, adapt the small storage layer
+to a shared database during the Azure deployment step. Do not point multiple
+replicas at independent local files or a network-mounted SQLite file.
+
 ## Validation and remaining work
 
 ```powershell
@@ -298,7 +417,10 @@ calendars. Horizons count observed bars. Strategy plots include simplified costs
 and execution assumptions and do not establish trading profitability. Previously
 inspected historical test periods are retrospective evidence.
 
-Live Azure deployment and ongoing performance monitoring remain subsequent steps. A successful benchmark is not proof of a verified live Azure
-deployment or performance-monitoring service. The `docs/` directory contains local
+Live Azure deployment, durable cloud monitoring storage and scheduling remain
+subsequent setup work. Prediction monitoring is implemented and tested locally;
+real rolling results require issued forecasts followed by fresh outcomes.
+A successful benchmark is not proof of a verified live Azure deployment.
+The `docs/` directory contains local
 project guides and is intentionally excluded from Git; it is absent from a fresh
 clone. The existing research CLI and ETL dependencies remain available.

@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import sqlite3
 import time
 from typing import Literal
 import uuid
@@ -22,6 +23,7 @@ from pydantic import BaseModel, Field
 from .artifacts import load_bundle
 from .registry import read_registry
 from .data import features, forecast_session, normalize, read_csv, transform
+from .monitoring import database, database_path, save_forecast
 
 logger = logging.getLogger("stock_forecasting.api")
 
@@ -35,6 +37,7 @@ class PredictionRequest(BaseModel):
 
 
 class PredictionResponse(BaseModel):
+    forecast_id: str | None = None
     symbol: str
     model: str
     model_version: str
@@ -60,7 +63,7 @@ def cached_bundle(path: str):
     return load_bundle(path)
 
 
-def predict_bundle(bundle_path, data_root, request):
+def predict_bundle(bundle_path, data_root, request, monitor_path=None):
     try:
         model, scaler, meta = cached_bundle(str(Path(bundle_path).resolve()))
         c = replace(model.config, start=None, end=None, as_of=None)
@@ -88,7 +91,7 @@ def predict_bundle(bundle_path, data_root, request):
         implied = float(frame.close.iloc[-1] * np.exp(predicted)) if predicted is not None else None
         if implied is not None and not np.isfinite(implied):
             raise ValueError("Nonfinite implied price")
-        return PredictionResponse(
+        response = PredictionResponse(
             symbol=request.symbol,
             model=c.family,
             model_version=meta["model_version"],
@@ -106,6 +109,15 @@ def predict_bundle(bundle_path, data_root, request):
             data_version=sha256(frame.to_csv(index=False).encode()).hexdigest()[:20],
             training_data_version=meta["dataset"]["dataset_version"],
         )
+        if monitor_path is not None:
+            try:
+                response.forecast_id = save_forecast(
+                    monitor_path, response.model_dump(), c, float(frame.close.iloc[-1])
+                )
+            except (OSError, sqlite3.Error, ValueError):
+                logger.exception("Forecast monitoring persistence failed")
+                raise HTTPException(503, "Forecast could not be recorded; inspect monitoring storage") from None
+        return response
     except FileNotFoundError:
         raise HTTPException(503, "Model artifact or historical data missing") from None
     except (ValueError, KeyError, RuntimeError) as exc:
@@ -113,10 +125,26 @@ def predict_bundle(bundle_path, data_root, request):
         raise HTTPException(422, "Data, calendar or artifact incompatible; inspect service logs") from None
 
 
-def create_app(model_root=None, data_root=None):
+def create_app(model_root=None, data_root=None, monitor_path=None):
     root = Path(model_root or os.getenv("FORECAST_MODEL_ROOT", "artifacts/models"))
     data = Path(data_root or os.getenv("FORECAST_DATA_ROOT", "data/raw"))
+    monitor = (
+        monitor_path if monitor_path is not None else database_path(root.parent / "monitoring" / "forecasts.sqlite3")
+    )
     app = FastAPI(title="Stock return forecasting", version="1.0.0")
+
+    def monitoring_ready():
+        if (
+            os.getenv("FORECAST_ENV", "local") != "local"
+            and monitor_path is None
+            and not os.getenv("FORECAST_MONITOR_DB")
+        ):
+            raise HTTPException(503, "Configure durable FORECAST_MONITOR_DB storage before production serving")
+        try:
+            with database(monitor):
+                pass
+        except (OSError, sqlite3.Error):
+            raise HTTPException(503, "Forecast monitoring storage unavailable") from None
 
     def authorize(x_api_key: str | None = Header(default=None)):
         key = os.getenv("FORECAST_API_KEY")
@@ -204,6 +232,7 @@ def create_app(model_root=None, data_root=None):
             raise HTTPException(503, "No model bundles available")
         if os.getenv("FORECAST_ENV", "local") != "local" and not os.getenv("FORECAST_API_KEY"):
             raise HTTPException(503, "Service authentication is not configured")
+        monitoring_ready()
         for entry in entries:
             try:
                 cached_bundle(entry["path"])
@@ -243,7 +272,8 @@ def create_app(model_root=None, data_root=None):
                     raise HTTPException(503, "Promoted model is unavailable")
         if len(matches) != 1:
             raise HTTPException(409, "Specify model_version from /models; multiple evaluated versions exist")
-        return predict_bundle(matches[0]["path"], data, request)
+        monitoring_ready()
+        return predict_bundle(matches[0]["path"], data, request, monitor_path=monitor)
 
     return app
 

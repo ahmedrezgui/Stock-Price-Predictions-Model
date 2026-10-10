@@ -155,5 +155,8 @@ mlflow.db
 mlflow.db-*
 .ruff_cache/
 reports/smoke/
+reports/monitoring/
+*.sqlite3
+*.sqlite3-*
 # Generated portfolio results are intentionally versionable.
 !reports/**/*.csv
