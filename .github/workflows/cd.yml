@@ -1,12 +1,11 @@
 name: Deployment to Azure App Service
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build-and-deploy:
+    environment: azure-approved
     runs-on: ubuntu-24.04
 
     steps:

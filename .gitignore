@@ -92,6 +92,7 @@ celerybeat-schedule
 # Environments
 .env
 .venv
+.venv-forecast/
 env/
 venv/
 ENV/
@@ -141,3 +142,14 @@ data/processed/*
 *.parquet
 *.pkl
 *.joblib
+
+# Reproducible local forecasting artifacts; publish deliberately through storage.
+artifacts/
+deployment/
+*.pt
+mlruns/
+mlflow.db
+.ruff_cache/
+reports/smoke/
+# Generated portfolio results are intentionally versionable.
+!reports/**/*.csv

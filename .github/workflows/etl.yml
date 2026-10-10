@@ -28,6 +28,8 @@ env:
   INDEX_NAME:             ${{ secrets.INDEX_NAME }}
 jobs:
   ETL:
+    outputs:
+      data_revision: ${{ steps.revision.outputs.sha }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -76,11 +78,11 @@ jobs:
       run: |
         git config --global user.email "stock-prices-bot@github.com"
         git config --global user.name "Stock Prices Bot"
-      
+
     - name: Extract Data
       run: |
           source $HOME/miniconda/bin/activate
-          conda activate Stock_Price_Prediction 
+          conda activate Stock_Price_Prediction
           dvc pull
           python -m scripts.download_data --date $CURRENT_DATE
           echo "Checking if any CSVs were created..."
@@ -116,3 +118,13 @@ jobs:
       run: |
           git remote set-url origin https://x-access-token:${{ steps.generate-token.outputs.token }}@github.com/${{ github.repository }}
           git push origin ${GITHUB_REF#refs/heads/}
+    - name: Record validated data revision
+      id: revision
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  train:
+    needs: ETL
+    uses: ./.github/workflows/train.yml
+    with:
+      data_revision: ${{ needs.ETL.outputs.data_revision }}
+    secrets: inherit

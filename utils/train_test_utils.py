@@ -34,7 +34,7 @@ def split_dataset(dataset: pd.DataFrame, test_size: float = 0.2) -> tuple [pd.Da
 
     return train_set, test_set
 
-def get_features_target_from_dataset(dataset: np.ndarray, ShouldOnlyKeepCloseCol: bool, closeColIdx: int , isArimaContext: bool, window:int = 60, )-> tuple[np.ndarray, np.ndarray] :
+def get_features_target_from_dataset(dataset: np.ndarray, closeColIdx: int , isArimaContext: bool, window:int = 3, )-> tuple[np.ndarray, np.ndarray] :
     X = []
     Y = []
     if isArimaContext == True:
@@ -42,8 +42,7 @@ def get_features_target_from_dataset(dataset: np.ndarray, ShouldOnlyKeepCloseCol
     for i in range(window, dataset.shape[0]):
         X.append(dataset[i-window:i])
         y_to_append = dataset[i]
-        if (ShouldOnlyKeepCloseCol):
-            y_to_append = y_to_append[closeColIdx] ## index of the cloture column
+        y_to_append = y_to_append[closeColIdx] ## index of the cloture column
         Y.append(y_to_append)
     return np.array(X), np.array(Y)
 
@@ -56,7 +55,7 @@ def train_model(model: IModel, model_name: str, dataset: pd.DataFrame | np.ndarr
     scaler = train(model_dict, window_size, scaler_dict=scaler_dict, last_trained_date=last_trained_date)[model_name]
     return scaler
 
-def train(models_dictionary: Dict[str, tuple[IModel, pd.DataFrame | np.ndarray, pd.DataFrame | np.ndarray]], window_size: int = 60, scaler_dict: Dict[str, MinMaxScaler] = None, last_trained_date: datetime = datetime.today()) -> Dict[str, MinMaxScaler]:
+def train(models_dictionary: Dict[str, tuple[IModel, pd.DataFrame | np.ndarray, pd.DataFrame | np.ndarray]], window_size: int = 1, scaler_dict: Dict[str, MinMaxScaler] = None, last_trained_date: datetime = datetime.today()) -> Dict[str, MinMaxScaler]:
     new_scaler_dict = {}
     for name, tuple in models_dictionary.items():
         print(f"training {name} model ...")
@@ -66,29 +65,39 @@ def train(models_dictionary: Dict[str, tuple[IModel, pd.DataFrame | np.ndarray, 
             scaler = scaler_dict.get(name)
         model = tuple[0]
         df = tuple[1]
-        ShouldOnlyKeepCloseCol = df.shape[1] > 1 # if the dataframe has more than one column we need to keep cloture only as target
         isArimaContext = isinstance(model, ARIMAModel)
-        if ShouldOnlyKeepCloseCol :
-            df_copy = df.copy()
-            cols_to_drop = df_copy.columns[df_copy.columns.str.match('date')]
-            df_copy.drop(cols_to_drop, axis=1, inplace=True)
-            df_transformed = scaler.fit_transform(df_copy)
+        if isinstance(df, pd.DataFrame):
+            if any(str(c).startswith('target_') for c in df.columns):
+                raise ValueError("Future target columns cannot enter legacy price features; use stock_forecasting.")
+            df_copy = df.drop(columns=['date', 'symbole'], errors='ignore')
+            if isArimaContext:
+                df_copy = df_copy[['cloture']]
+            df_transformed = scaler.transform(df_copy) if hasattr(scaler, 'scale_') else scaler.fit_transform(df_copy)
             closeColIdx = df_copy.columns.get_loc('cloture')
-        else :
-            df_transformed = scaler.fit_transform(df)
-            closeColIdx = 0
-        x_train, y_train = get_features_target_from_dataset(df_transformed, ShouldOnlyKeepCloseCol, closeColIdx=closeColIdx, isArimaContext=isArimaContext, window=window_size)
+        else:
+            df = np.asarray(df)
+            if df.ndim == 1:
+                df = df.reshape(-1, 1)
+            df_transformed = scaler.transform(df) if hasattr(scaler, 'scale_') else scaler.fit_transform(df)
+            closeColIdx = 0  # NumPy inputs have no column names; target is column 0.
+        x_train, y_train = get_features_target_from_dataset(df_transformed, closeColIdx=closeColIdx, isArimaContext=isArimaContext, window=window_size)
+        scaler.sequence_length_ = window_size
         model.train(x_train, y_train, last_trained_date)
         new_scaler_dict[name] = scaler
     return new_scaler_dict
 
 def predict(model: IModel, dataset: np.ndarray, scaler: MinMaxScaler, num_days: int, window_size: int) -> np.ndarray:
+    if scaler.n_features_in_ != 1:
+        raise ValueError("Legacy recursive price inference supports close-only models; use the return API for multiple features.")
+    if isinstance(model, ARIMAModel):
+        values = np.asarray(model.predict(np.zeros(num_days))).reshape(-1, 1)
+        return scaler.inverse_transform(values).ravel()
     last_n_days = scaler.transform(dataset[-window_size: ]).flatten()
     output = np.array([])
     for i in range(num_days):
         print(f'output: {output}, length: {output.__len__()}')
         print(f'last {window_size} days: {last_n_days}, length: {last_n_days.__len__()}')
-        predicted_value = model.predict(last_n_days.reshape(1,-1))
+        predicted_value = np.asarray(model.predict(last_n_days.reshape(1, window_size, 1))).reshape(1, 1)
         transformed_predicted_value = scaler.inverse_transform(predicted_value)
         last_n_days = np.delete(last_n_days, 0)
         last_n_days = np.append(last_n_days, predicted_value)
@@ -104,19 +113,23 @@ def evaluate(models_dictionary: Dict[str, tuple[IModel, pd.DataFrame, pd.DataFra
         scaler = scaler_dict.get(model_name) 
         if scaler == None:
             raise KeyError(f"Scaler couldn't be found for model: {model_name}")
-        ShouldOnlyKeepCloseCol = test_df.shape[1] > 1
         isArimaContext = isinstance(model, ARIMAModel)
-        if ShouldOnlyKeepCloseCol :
-            test_df_copy = test_df.copy()
-            cols_to_drop = test_df_copy.columns[test_df_copy.columns.str.match('date')]
-            test_df_copy.drop(cols_to_drop, axis=1, inplace=True)
+        if isinstance(test_df, pd.DataFrame):
+            test_df_copy = test_df.drop(columns=['date', 'symbole'], errors='ignore')
+            if any(str(c).startswith('target_') for c in test_df_copy.columns):
+                raise ValueError("Future target columns cannot enter legacy price evaluation.")
+            if hasattr(scaler, 'feature_names_in_'):
+                test_df_copy = test_df_copy.loc[:, scaler.feature_names_in_]
             test_dataset_transformed = scaler.transform(test_df_copy)
             closeColIdx = test_df_copy.columns.get_loc('cloture')
-        else :
+        else:
+            test_df = np.asarray(test_df)
+            if test_df.ndim == 1:
+                test_df = test_df.reshape(-1, 1)
             test_dataset_transformed = scaler.transform(test_df)
-            closeColIdx = 0   
+            closeColIdx = 0
         scale = 1/scaler.scale_[closeColIdx]         
-        x_test, y_test = get_features_target_from_dataset(test_dataset_transformed, ShouldOnlyKeepCloseCol, closeColIdx=closeColIdx, isArimaContext=isArimaContext)
+        x_test, y_test = get_features_target_from_dataset(test_dataset_transformed, closeColIdx=closeColIdx, isArimaContext=isArimaContext, window=getattr(scaler, 'sequence_length_', 1))
         result[model_name] = model.evaluate(x_test, y_test, metric, scale)
     return result
 

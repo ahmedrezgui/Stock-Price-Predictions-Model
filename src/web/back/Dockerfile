@@ -14,6 +14,7 @@ SHELL ["conda", "run", "-n", "stock-backend", "/bin/bash", "-lc"]
 # Copy the entire repository into /app (so that .dvc/config and data/processed/*.dvc are available)
 # We copy “.” because the build context is the repo root.
 COPY . /app
+RUN python -m pip install --no-cache-dir .
 
 EXPOSE 8000
 

@@ -1,0 +1,368 @@
+{
+  "/health": {
+    "status": "ok"
+  },
+  "/ready": {
+    "status": "ready",
+    "models": 42
+  },
+  "/models": [
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 1,
+      "model_version": "BIAT-gru-direction-h1-60b5fe05711a",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 1,
+      "model_version": "BIAT-gru-direction-h1-ef42899d7451",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 1,
+      "model_version": "BIAT-gru-direction-h1-ef64293db6ed",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 20,
+      "model_version": "BIAT-gru-direction-h20-10006b6ca669",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 20,
+      "model_version": "BIAT-gru-direction-h20-6010b3de2e31",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 20,
+      "model_version": "BIAT-gru-direction-h20-62508035ddb3",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 5,
+      "model_version": "BIAT-gru-direction-h5-299bd2d59bf5",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 5,
+      "model_version": "BIAT-gru-direction-h5-548091bb169b",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "direction",
+      "horizon": 5,
+      "model_version": "BIAT-gru-direction-h5-e66275ab2971",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "multitask",
+      "horizon": 1,
+      "model_version": "BIAT-gru-multitask-h1-a1134ca040a9",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "multitask",
+      "horizon": 1,
+      "model_version": "BIAT-gru-multitask-h1-bb18389e4f89",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "multitask",
+      "horizon": 1,
+      "model_version": "BIAT-gru-multitask-h1-e76ea9b7d699",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 1,
+      "model_version": "BIAT-gru-return-h1-325888b3faac",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 1,
+      "model_version": "BIAT-gru-return-h1-4cda9e5d5c3d",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 1,
+      "model_version": "BIAT-gru-return-h1-53c5d3701c0b",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 20,
+      "model_version": "BIAT-gru-return-h20-02049d1feb81",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 20,
+      "model_version": "BIAT-gru-return-h20-e98e4bf43c36",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 20,
+      "model_version": "BIAT-gru-return-h20-ef21b6bd0908",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 5,
+      "model_version": "BIAT-gru-return-h5-52f5dafd03c3",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 5,
+      "model_version": "BIAT-gru-return-h5-5b6b6a68c73f",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "gru",
+      "task": "return",
+      "horizon": 5,
+      "model_version": "BIAT-gru-return-h5-b259abc644f3",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-direction-h1-3815ce8b7e5b",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-direction-h1-431d0464bb95",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-direction-h1-e4d7123d89ca",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 20,
+      "model_version": "BIAT-lstm-direction-h20-9100c075db36",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 20,
+      "model_version": "BIAT-lstm-direction-h20-c24a592040f2",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 20,
+      "model_version": "BIAT-lstm-direction-h20-f5f9208c7d0b",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 5,
+      "model_version": "BIAT-lstm-direction-h5-8b90d8b28d0e",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 5,
+      "model_version": "BIAT-lstm-direction-h5-9c39ea084c1c",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "direction",
+      "horizon": 5,
+      "model_version": "BIAT-lstm-direction-h5-eeca26156c9f",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "multitask",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-multitask-h1-1787969a843a",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "multitask",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-multitask-h1-2a12adeb7f1c",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "multitask",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-multitask-h1-63f7364a9a59",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-return-h1-3b7ef7fcd812",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-return-h1-9015d87c4ff1",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 1,
+      "model_version": "BIAT-lstm-return-h1-c7135c2206d3",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 20,
+      "model_version": "BIAT-lstm-return-h20-3236262bb97b",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 20,
+      "model_version": "BIAT-lstm-return-h20-c7e8ba1624ff",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 20,
+      "model_version": "BIAT-lstm-return-h20-f449f0dff394",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 5,
+      "model_version": "BIAT-lstm-return-h5-0df5474f9cfd",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 5,
+      "model_version": "BIAT-lstm-return-h5-0e9c88aeb049",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    },
+    {
+      "symbol": "BIAT",
+      "model": "lstm",
+      "task": "return",
+      "horizon": 5,
+      "model_version": "BIAT-lstm-return-h5-7287e4c8a697",
+      "horizon_basis": "observed_bars_unverified_sessions"
+    }
+  ],
+  "prediction": {
+    "symbol": "BIAT",
+    "model": "lstm",
+    "model_version": "BIAT-lstm-return-h1-3b7ef7fcd812",
+    "forecast_horizon_sessions": null,
+    "forecast_horizon_observations": 1,
+    "horizon_basis": "observed_bars_unverified_sessions",
+    "as_of": "2026-10-07",
+    "forecast_for": null,
+    "predicted_log_return": 0.0004538733046501875,
+    "implied_price": 161.57331717579683,
+    "price_basis": "unverified",
+    "direction": "up",
+    "probability_up": null,
+    "probability_calibration": null,
+    "prediction_interval": null,
+    "data_version": "ee0f9e5b4b1835679e07",
+    "training_data_version": "e2cdd1b2408a383b4dcb",
+    "status": "success"
+  },
+  "latency_ms": "122.982"
+}

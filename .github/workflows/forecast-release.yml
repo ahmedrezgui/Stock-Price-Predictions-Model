@@ -1,0 +1,70 @@
+name: Release promoted forecasting service
+on:
+  workflow_dispatch:
+    inputs:
+      training_run_id:
+        description: Successful training run containing reviewed promoted models
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: forecast-release
+  cancel-in-progress: false
+jobs:
+  release:
+    environment: azure-approved
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install .
+      - uses: actions/download-artifact@v4
+        with:
+          name: forecast-training-${{ inputs.training_run_id }}
+          run-id: ${{ inputs.training_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: release-input
+      - name: Validate and package promoted bundles
+        run: python -m stock_forecasting.release --models release-input/artifacts/models --data release-input/data/raw --output deployment
+      - name: Build and check serving image
+        run: |
+          docker build --target packaged -t forecast-release .
+          docker run -d --name forecast-smoke -p 8000:8000 forecast-release
+          for attempt in $(seq 1 30); do
+            if curl --fail http://localhost:8000/ready; then break; fi
+            sleep 2
+          done
+          curl --fail http://localhost:8000/ready
+          docker stop forecast-smoke
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publish verified image
+        env:
+          REPOSITORY: ${{ vars.FORECAST_IMAGE_REPOSITORY }}
+        run: |
+          test -n "$REPOSITORY"
+          docker tag forecast-release "$REPOSITORY:${GITHUB_SHA}"
+          docker push "$REPOSITORY:${GITHUB_SHA}"
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Update existing forecasting App Service
+        env:
+          RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          APP_NAME: ${{ secrets.AZURE_FORECAST_APP_NAME }}
+          API_KEY: ${{ secrets.FORECAST_API_KEY }}
+          REPOSITORY: ${{ vars.FORECAST_IMAGE_REPOSITORY }}
+        run: |
+          test -n "$APP_NAME"
+          test -n "$API_KEY"
+          az webapp config appsettings set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --settings FORECAST_ENV=production FORECAST_API_KEY="$API_KEY" --output none
+          az webapp config container set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --docker-custom-image-name "$REPOSITORY:${GITHUB_SHA}" --docker-registry-server-url https://index.docker.io
+          az webapp restart --name "$APP_NAME" --resource-group "$RESOURCE_GROUP"

@@ -7,7 +7,6 @@ dependencies:
   - pandas
   - numpy
   - scikit-learn
-  - keras
   - pip
   - matplotlib
   - statsmodels

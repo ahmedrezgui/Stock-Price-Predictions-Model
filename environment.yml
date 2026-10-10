@@ -4,7 +4,6 @@ dependencies:
   - pandas
   - numpy
   - scikit-learn
-  - keras
   - statsmodels
   - pmdarima
   - jupyter

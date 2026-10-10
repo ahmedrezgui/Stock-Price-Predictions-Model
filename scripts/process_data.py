@@ -15,9 +15,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 def fill_missing_dates_interpolation(stock_df, date_col='date'):
     """
-    Fill missing dates in stock history DataFrame with:
-    - ouverture, haut, bas, cloture, volume = interpolated values (numeric)
-    Without altering existing non-null values.
+    Compatibility name: normalize observed rows without creating trading bars.
+
+    Interpolation of financial observations was removed because it used future
+    prices and fabricated weekend/holiday volume. Use stock_forecasting for
+    strict OHLCV validation, return features and versioned research datasets.
     """
     try:
         df = stock_df.copy()
@@ -26,13 +28,14 @@ def fill_missing_dates_interpolation(stock_df, date_col='date'):
         if date_col not in df.columns:
             raise ValueError(f"Required column '{date_col}' not found in DataFrame")
 
-        df[date_col] = pd.to_datetime(df[date_col], format='%d/%m/%Y', dayfirst=True)
+        if df.empty:
+            raise ValueError("Empty stock history")
+        if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+            values = df[date_col].astype(str)
+            df[date_col] = pd.to_datetime(values, dayfirst=values.str.contains('/').any())
         df = df.set_index(date_col).sort_index()
-        all_dates = pd.date_range(start=df.index.min(), end=df.index.max(), freq='D')
-
-        original_dates = df.index
-        df = df.reindex(all_dates)
-        is_new_row = ~df.index.isin(original_dates)
+        if df.index.duplicated().any():
+            raise ValueError("Duplicate dates require reconciliation")
 
         # For OHLC columns, ensure numeric type before interpolation
         ohlc_columns = ['ouverture', 'haut', 'bas', 'cloture', 'volume']
@@ -40,10 +43,6 @@ def fill_missing_dates_interpolation(stock_df, date_col='date'):
             if col in df.columns:
                 # Convert to numeric, handling European decimal commas if needed
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
-                # Create temporary series with interpolated values
-                interpolated = df[col].interpolate(method='linear')
-                # Only update the new rows with interpolated values
-                df.loc[is_new_row, col] = interpolated.loc[is_new_row]
 
         return df.reset_index().rename(columns={'index': date_col})
     
@@ -92,40 +91,10 @@ def process_all_raw_files():
             # Convert date column to datetime for comparison
             raw_df['date'] = pd.to_datetime(raw_df['date'], format='%d/%m/%Y', dayfirst=True)
             
-            # Check if processed file exists
-            if os.path.exists(output_path):
-                # Read existing processed file
-                processed_df = pd.read_csv(output_path, sep=';')
-                processed_df['date'] = pd.to_datetime(processed_df['date'], format='%Y-%m-%d', dayfirst=True)
-                
-                # Get last dates from both files
-                last_processed_date = processed_df['date'].max()
-                last_raw_date = raw_df['date'].max()
-                
-                if last_raw_date <= last_processed_date:
-                    logger.info(f"No new data in {file_name}, skipping update")
-                    success_count += 1
-                    continue
-                
-                # Find new rows (dates after last processed date)
-                new_rows = raw_df[raw_df['date'] > last_processed_date].copy()
-                
-                if not new_rows.empty:
-                    logger.info(f"Found {len(new_rows)} new rows to append")
-                    
-                    # Combine old processed data with new rows
-                    combined_df = pd.concat([processed_df, new_rows], ignore_index=True)
-                    
-                    # Apply interpolation on the combined dataframe
-                    processed_df = fill_missing_dates_interpolation(combined_df)
-                else:
-                    logger.info("No new rows found despite date difference, skipping update")
-                    success_count += 1
-                    continue
-            else:
-                # No existing file, process entire raw file
-                processed_df = fill_missing_dates_interpolation(raw_df)
-            
+            # Rebuild from observed raw rows to remove legacy synthetic dates and
+            # incorporate provider corrections; never append interpolated history.
+            processed_df = fill_missing_dates_interpolation(raw_df)
+
             # Save processed data
             processed_df.to_csv(output_path, index=False, sep=';')
             logger.info(f"Successfully processed and saved to {output_path}")

@@ -11,6 +11,31 @@ import sys
 sys.path.insert(0, str(Path(os.getcwd()) / '..'))
 from utils import RAW_DATA_DOWNLOAD_BASELINK, HEADERS, SYMBOLS
 
+
+class CloudflareBlockedError(RuntimeError):
+    """The server returned a security block or challenge instead of stock data."""
+
+
+def check_response(response):
+    body = response.text.lower()
+    if (response.headers.get('cf-mitigated') == 'challenge'
+            or 'cf-chl-' in body
+            or ('cloudflare' in body and 'sorry, you have been blocked' in body)):
+        ray_id = response.headers.get('cf-ray')
+        if not ray_id:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            label = soup.find(string=lambda text: text and 'Cloudflare Ray ID:' in text)
+            value = label.parent.find('strong') if label else None
+            ray_id = value.get_text(strip=True) if value else 'unavailable'
+        raise CloudflareBlockedError(
+            f"Cloudflare blocked or challenged {response.url} "
+            f"(HTTP {response.status_code}, Ray ID: {ray_id}). "
+            "The download form/CSV was not received. Contact ilboursa with this "
+            "Ray ID and request details to arrange automated access."
+        )
+    response.raise_for_status()
+
+
 def get_dates(start):
     """
     Converts start date from string format to date object
@@ -50,13 +75,14 @@ def download(start_date, end_date ,cookies, token, session, link, fileName):
     cookies = session.cookies.get_dict()
 
     # Prepare POST data (form fields)
-    data = {
-        'dtFrom': start_date,
-        '__Invariant': 'dtFrom',
-        'dtTo': end_date,
-        '__Invariant': 'dtTo',
-        '__RequestVerificationToken': token
-    }
+    # A list preserves both __Invariant fields; a dict discards the first one.
+    data = [
+        ('dtFrom', start_date),
+        ('__Invariant', 'dtFrom'),
+        ('dtTo', end_date),
+        ('__Invariant', 'dtTo'),
+        ('__RequestVerificationToken', token),
+    ]
 
     # Prepare headers to mimic a real browser
     post_headers = {
@@ -67,25 +93,26 @@ def download(start_date, end_date ,cookies, token, session, link, fileName):
     }
 
     # Make POST request with data + headers + EXPLICIT cookies
-    response_post = session.post(link, data=data, headers=post_headers, cookies=cookies)
+    response_post = session.post(link, data=data, headers=post_headers, cookies=cookies, timeout=30)
+    check_response(response_post)
 
+    lines = response_post.content.decode('utf-8-sig').splitlines()
+    if not lines or lines[0] != HEADERS:
+        raise RuntimeError(
+            f"Expected CSV from {link}, received HTTP {response_post.status_code} "
+            f"with Content-Type {response_post.headers.get('Content-Type', 'unknown')}. "
+            "The response may be an error, login page, or no-data page; no file was written."
+        )
+    os.makedirs("data/raw", exist_ok=True)
     file_path = f"data/raw/{fileName}"
-    if response_post.status_code == 200:
-        if not os.path.exists("data/raw"):
-            os.makedirs("data/raw")
-        response_post_content_to_array = response_post.content.decode().split('\r\n')
-        if response_post_content_to_array[0] == HEADERS: ## Ugly hack to check if the content is indeed a csv file (if there are no data the api call returns an html file)
-            with open(file_path, 'a') as f:
-                if os.stat(file_path).st_size == 0:
-                    print(f"{file_path} created successfully")
-                    f.write(f'{HEADERS}\n')
-                for i in range(1,len(response_post_content_to_array)): ## We skip first line because it's the headers
-                    line = response_post_content_to_array[i]
-                    if line != '':
-                        f.write(f'{response_post_content_to_array[i]}\n')
-    else:
-        raise Exception(f"❌ Failed to download file. Status code: {response_post.status_code}")
-            
+    with open(file_path, 'a', encoding='utf-8') as f:
+        if os.stat(file_path).st_size == 0:
+            print(f"{file_path} created successfully")
+            f.write(f'{HEADERS}\n')
+        for line in lines[1:]:
+            if line:
+                f.write(f'{line}\n')
+
 def main(date):
     today=datetime.today().date()
 
@@ -98,13 +125,17 @@ def main(date):
 
         # First GET request to load page and retrieve token + cookies
         url_get = f'{RAW_DATA_DOWNLOAD_BASELINK}{symbol}'
-        response_get = session.get(url_get)
+        response_get = session.get(url_get, timeout=30)
+        check_response(response_get)
 
         # Parse the __RequestVerificationToken from the HTML
         soup = BeautifulSoup(response_get.text, "html.parser")
         token_input = soup.find('input', {'name': '__RequestVerificationToken'})
-        if token_input is None:
-            raise Exception("Token not found on page. Maybe the page structure changed?")
+        if token_input is None or not token_input.get('value'):
+            raise RuntimeError(
+                f"Download form token missing at {url_get} (HTTP {response_get.status_code}). "
+                "The page may require login or its form may have changed."
+            )
         token = token_input['value']
 
         cookies = session.cookies.get_dict()

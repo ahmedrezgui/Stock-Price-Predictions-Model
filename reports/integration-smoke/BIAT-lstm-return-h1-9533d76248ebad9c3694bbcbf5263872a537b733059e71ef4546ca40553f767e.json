@@ -1,0 +1,54 @@
+{
+  "status": "rejected",
+  "model_version": "BIAT-lstm-return-h1-8cd448262f1b",
+  "fingerprint": "9533d76248ebad9c3694bbcbf5263872a537b733059e71ef4546ca40553f767e",
+  "identity": "BIAT-lstm-return-h1",
+  "validation_objective": 0.00011099036030819491,
+  "validation_metrics": {
+    "n": 436,
+    "positive_fraction": 0.41743119266055045,
+    "training_positive_fraction": 0.41037735849056606,
+    "regression": {
+      "mae": 0.005855213291254709,
+      "mse": 0.00011099036030819491,
+      "rmse": 0.010535196263392292,
+      "median_absolute_error": 0.0031556848110456583,
+      "r2": -0.020922754305065627,
+      "oos_r2_train_mean": -0.020446644142372072,
+      "oos_r2_zero": -0.02091537422709222,
+      "mase": 0.5244996849609116,
+      "bias": 0.0003024570705329156,
+      "residual_mean": -0.0003024570705329156,
+      "residual_std": 0.010542951198918094
+    },
+    "relationship": {
+      "pearson": -0.019588132132424826,
+      "spearman_ic": -0.05548371182716724
+    },
+    "direction": {
+      "accuracy": 0.44954128440366975,
+      "balanced_accuracy": 0.4652591502985204,
+      "precision": 0.3893129770992366,
+      "recall": 0.5604395604395604,
+      "f1": 0.4594594594594595,
+      "tpr": 0.5604395604395604,
+      "tnr": 0.3700787401574803,
+      "confusion_matrix": [
+        [
+          94,
+          160
+        ],
+        [
+          80,
+          102
+        ]
+      ],
+      "train_majority_accuracy": 0.5825688073394495
+    }
+  },
+  "baseline_objective": 0.00010876645138215536,
+  "policy": "validation MSE or Brier <= train-only mean baseline",
+  "fit_policy": "development_only_no_production_refit",
+  "holdout_used": false,
+  "candidate_version": "BIAT-lstm-return-h1-8cd448262f1b"
+}

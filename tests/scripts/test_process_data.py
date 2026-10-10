@@ -77,20 +77,20 @@ def sample_csv_file(temp_data_dirs):
 
 class TestFillMissingDatesInterpolation:
     def test_basic_functionality(self, sample_stock_data):
-        """Test that missing dates are filled with interpolated values"""
+        """Test that only observed dates are retained"""
         result = fill_missing_dates_interpolation(sample_stock_data)
         
         # Check all dates are present
-        expected_dates = ['01/01/2023', '02/01/2023', '03/01/2023', '04/01/2023', '05/01/2023', '06/01/2023']
-        assert len(result) == 6
+        expected_dates = ['01/01/2023', '03/01/2023', '04/01/2023', '06/01/2023']
+        assert len(result) == 4
         assert all(result['date'].dt.strftime('%d/%m/%Y') == expected_dates)
         
         # Check interpolation
-        assert result.loc[1, 'ouverture'] == pytest.approx(101.0)  # Between 100 and 102
-        assert result.loc[4, 'cloture'] == pytest.approx(104.5)    # Between 103.5 and 105.5
+        assert result.loc[1, 'ouverture'] == pytest.approx(102.0)
+        assert result.loc[3, 'cloture'] == pytest.approx(105.5)
         
         # Check volume for missing dates is filled with interpolated values
-        assert result.loc[1, 'volume'] == pytest.approx(1100)
+        assert result.loc[1, 'volume'] == pytest.approx(1200)
     
     def test_european_decimal_format(self, sample_stock_data_with_commas):
         """Test that European decimal format (commas) is handled correctly"""
@@ -98,11 +98,11 @@ class TestFillMissingDatesInterpolation:
         
         # Check values were properly converted
         assert result.loc[0, 'ouverture'] == pytest.approx(100.0)
-        assert result.loc[1, 'ouverture'] == pytest.approx(101.25)
-        assert result.loc[2, 'ouverture'] == pytest.approx(102.5)
+        assert len(result) == 2
+        assert result.loc[1, 'ouverture'] == pytest.approx(102.5)
         
         # Check interpolation worked (average of 100.0 and 102.5)
-        assert result.loc[1, 'date'].strftime('%d/%m/%Y') == '02/01/2023'
+        assert result.loc[1, 'date'].strftime('%d/%m/%Y') == '03/01/2023'
     
     def test_missing_columns(self, sample_stock_data_missing_columns):
         """Test function with missing some OHLC columns"""
@@ -143,7 +143,7 @@ class TestProcessAllRawFiles:
         
         # Check content
         result = pd.read_csv(output_file, sep=';')
-        assert len(result) == 3  # Original had 2 dates, should add 1 missing date
+        assert len(result) == 2  # Original had 2 dates, should add 1 missing date
         
         # Check symbol column was removed
         assert 'symbole' not in result.columns
@@ -187,7 +187,7 @@ class TestProcessAllRawFiles:
         
         # Verify file was updated (now has 3 rows - original 1 + new 1 + interpolated 1)
         result = pd.read_csv(output_file, sep=';')
-        assert len(result) == 3
+        assert len(result) == 2
     
     def test_no_raw_files(self, temp_data_dirs):
         """Test when no raw files exist"""

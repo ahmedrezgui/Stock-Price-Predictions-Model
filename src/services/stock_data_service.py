@@ -130,6 +130,22 @@ def _forecast_from_df(company: str, df: pd.DataFrame, horizon: int = None) -> di
     }
 
 
+def get_return_prediction(company: str, horizon: int = 1) -> dict:
+    """Load the promoted complete bundle using the same inference service as /forecast."""
+    from stock_forecasting.api import PredictionRequest, predict_bundle
+    from stock_forecasting.registry import read_registry
+    root = Path(os.getenv("FORECAST_MODEL_ROOT", "artifacts/models"))
+    family = os.getenv("FORECAST_MODEL_FAMILY", "lstm").lower()
+    task = os.getenv("FORECAST_TASK", "return")
+    request = PredictionRequest(symbol=company, model=family, task=task, horizon=horizon)
+    key = f"{company}-{family}-{task}-h{horizon}"
+    version = read_registry(root)["active"].get(key)
+    if not version:
+        raise ModelUnavailableError("No promoted forecasting model for this company/task/horizon")
+    response = predict_bundle(root / version, Path(os.getenv("FORECAST_DATA_ROOT", "data/raw")), request)
+    return response.model_dump()
+
+
 def get_prediction(company: str, horizon: int = None) -> dict:
     """
     Forecast a company's closing price.
@@ -145,6 +161,8 @@ def get_prediction(company: str, horizon: int = None) -> dict:
     Raises:
         CompanyNotFoundError, DataUnavailableError, ModelUnavailableError.
     """
+    if os.getenv("FORECAST_SERVING_MODE", "legacy") == "bundles":
+        return get_return_prediction(company, horizon or 1)
     df = load_company_df(company)
     return _forecast_from_df(company, df, horizon)
 

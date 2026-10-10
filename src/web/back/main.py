@@ -10,7 +10,17 @@ from src.services import (
     DataUnavailableError,
     ModelUnavailableError,
 )
-from src.rag import ask, create_agents_graph
+def ask(*args, **kwargs):
+    from src.rag import ask as run
+    global agents
+    if agents is None:
+        agents = create_agents_graph()
+    return run(agents, *args[1:], **kwargs)
+
+def create_agents_graph():
+    from src.rag import create_agents_graph as create
+    return create()
+
 from dotenv import load_dotenv
 import json
 import uuid
@@ -23,9 +33,11 @@ BACKEND_CACHE_CONNECTION_STRING = os.environ.get("BACKEND_CACHE_CONNECTION_STRIN
 BACKEND_CACHE_EXPIRATION_TIME = int(os.environ.get("BACKEND_CACHE_EXPIRATION_TIME")) if os.environ.get("BACKEND_CACHE_EXPIRATION_TIME") != None else 0
 
 cacheService = CacheService.getInstance(BACKEND_CACHE_CONNECTION_STRING, DISABLE_BACKEND_CACHE, BACKEND_CACHE_EXPIRATION_TIME)
-agents = create_agents_graph()
+agents = None
 
 app = FastAPI()
+from stock_forecasting.api import create_app as create_forecast_app
+app.mount("/forecast", create_forecast_app())
 
 # CORS config for frontend access
 app.add_middleware(

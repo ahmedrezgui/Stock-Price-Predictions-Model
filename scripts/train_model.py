@@ -1,112 +1,72 @@
-import os
-import subprocess
-import pandas as pd
-from dotenv import load_dotenv
-import logging
+"""Shared candidate training entry point; local by default, Azure submission explicitly gated."""
 
-import sys
+import argparse
+from dataclasses import replace
+import json
 from pathlib import Path
-sys.path.insert(0, str(Path(os.getcwd()) / '..'))
-from src.handlers.model_handler import get_or_create_model, save_model
-from src.handlers.scaler_handler import get_or_create_scaler, save_scaler
-from utils.train_test_utils import train_model, evaluate
-from enums import ValidationMetricEnum
-from utils import send_email
+from stock_forecasting.config import Config
+from stock_forecasting.training import train_candidate
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
-def train():
-    DATA_DIR = os.path.join(os.path.dirname(__file__), "../data/processed")
-    DATA_DIR = os.path.abspath(DATA_DIR)
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", default="configs/training.json")
+    parser.add_argument("--backend", choices=["local", "azure"], default="local")
+    parser.add_argument("--data", help="Single local CSV, or Azure dataset URI with --backend azure")
+    parser.add_argument("--compute")
+    parser.add_argument("--approve-cloud-action", action="store_true")
+    parser.add_argument("--data-dir", default="data/raw")
+    parser.add_argument("--symbols", nargs="+")
+    parser.add_argument("--artifacts", default="artifacts/models")
+    parser.add_argument("--output", default="reports/training")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--refit-production",
+        action="store_true",
+        help="Refit accepted configuration on all matured labels; retire old research holdout",
+    )
+    args = parser.parse_args(argv)
+    config = Config.read(args.config)
+    if args.backend == "azure":
+        if not args.approve_cloud_action or not args.data or not args.compute:
+            parser.error("Azure submission requires --approve-cloud-action, --data and --compute")
+        if args.symbols:
+            parser.error("Azure single-file training uses the symbol in --config")
+        from stock_forecasting.azure import submit_training
 
-    load_dotenv()
+        job = submit_training(args.config, args.data, args.compute)
+        print(job.name)
+        return
+    if args.data and args.symbols and len(args.symbols) != 1:
+        parser.error("--data supports one symbol")
+    results = []
+    failed = False
+    for symbol in args.symbols or [config.symbol]:
+        if (
+            not symbol
+            or any(ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-" for ch in symbol)
+            or symbol in (".", "..")
+        ):
+            raise ValueError("Invalid symbol")
+        try:
+            result = train_candidate(
+                Path(args.data) if args.data else Path(args.data_dir) / f"{symbol}.csv",
+                replace(config, symbol=symbol),
+                args.artifacts,
+                args.output,
+                args.force,
+                args.refit_production,
+            )
+        except Exception as exc:
+            failed = True
+            result = {"symbol": symbol, "status": "failed", "error": str(exc)}
+        results.append(result)
+    Path(args.output).mkdir(parents=True, exist_ok=True)
+    (Path(args.output) / "run.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+    print(json.dumps(results, indent=2))
+    if failed:
+        raise SystemExit(1)
 
-    WINDOW_SIZE = int(os.environ.get("WINDOW_SIZE")) 
-    MODEL_NAME = os.environ.get("MODEL_NAME")
-    MODEL_LOCATION = os.environ.get("MODEL_LOCATION")
-    MODEL_EVAL_THRESHHOLD = float(os.environ.get("MODEL_EVAL_THRESHHOLD"))
-
-    stocks_list = [f.replace(".csv.dvc", "") for f in os.listdir(DATA_DIR) if f.endswith(".csv.dvc")]
-    all_models_evaluation = {}
-    logger.info(f"found {len(stocks_list)} stocks")
-    for stock in stocks_list:
-        logger.info(f"training model: {MODEL_NAME} for stock: {stock}")
-        dvc_file = os.path.join(DATA_DIR, f"{stock}.csv.dvc")
-        csv_file = dvc_file.replace(".dvc", "")
-        if not os.path.exists(csv_file):
-            logger.info("pulling csv files")
-            subprocess.run(["dvc", "pull", dvc_file], check=True, capture_output=True, text=True)
-        if not os.path.exists(csv_file):
-            logger.warning(f"{stock}.csv not found")
-            continue
-        df = pd.read_csv(csv_file, sep=";")
-        model = get_or_create_model(stock, MODEL_NAME, MODEL_LOCATION)
-        scaler = get_or_create_scaler(stock, MODEL_LOCATION)
-        last_trained_date = model.get_last_trained_date()
-        logger.info(f"model's old last trained date: {last_trained_date if last_trained_date else 'Never trained before'}")
-        df["date"] = pd.to_datetime(df["date"])
-        if last_trained_date:
-            num_train_rows = len(df[df['date'] > last_trained_date])
-        else:
-            num_train_rows = len(df["date"]) - WINDOW_SIZE
-        if num_train_rows == 0:
-            logger.warning("No new rows to train ...")
-            continue
-        logger.info(f"Found {num_train_rows} rows to train the model with")
-        new_last_trained_date = max(df["date"])
-        logger.info(f"model's new last trained date: {new_last_trained_date}")
-        full_model_name = f"{stock}"
-        if last_trained_date:
-            train_df = df.tail(WINDOW_SIZE + num_train_rows).copy()
-            # if the model is already pre-trained on old data we evaluate the model predictions of the days post last trained date
-            # based on the newly added data
-            logger.info(f"evaluating {full_model_name} model on dates from {train_df.iloc[-num_train_rows]['date']} to {train_df.iloc[-1]['date']} using MAPE")
-            train_df = train_df["cloture"].values.reshape(-1,1)
-            model_evaluation = evaluate({full_model_name: (model, [], train_df)}, ValidationMetricEnum.MAPE, {full_model_name: scaler})
-            if (model_evaluation[full_model_name] >= MODEL_EVAL_THRESHHOLD):
-                logger.warning(
-                    f"Model '{full_model_name}' (last trained on {last_trained_date}) exceeded the evaluation threshold for {ValidationMetricEnum.MAPE.name}: "
-                    f"threshold={MODEL_EVAL_THRESHHOLD}, result={model_evaluation[full_model_name]}"
-                )
-                # Send email notification
-                recipient_email = os.environ.get("EMAIL_RECIPIENT")
-                if recipient_email:
-                    subject = f"Model Evaluation Alert: {full_model_name} Exceeded Threshold"
-                    body = (
-                        f"Model Evaluation Alert:\n\n"
-                        f"Model Name: {full_model_name}\n"
-                        f"Evaluation Metric: {ValidationMetricEnum.MAPE.name}\n"
-                        f"Threshold Value: {MODEL_EVAL_THRESHHOLD}\n"
-                        f"Actual Result: {model_evaluation[full_model_name]}\n"
-                        f"Last Trained Date: {last_trained_date}\n\n"
-                        f"Please review the model's performance."
-                    )
-                    send_email(recipient_email, subject, body)
-                    logger.info(f"Sent evaluation alert email to {recipient_email} for model {full_model_name}")
-                else:
-                    logger.warning("EMAIL_RECIPIENT not set. Skipping alert email.")
-            else:
-                logger.info(
-                    f"Model '{full_model_name}' (last trained on {last_trained_date}) passed evaluation for {ValidationMetricEnum.MAPE.name}: "
-                    f"result={model_evaluation[full_model_name]}"
-                )
-            all_models_evaluation.update(model_evaluation)
-        else:
-            train_df = df.copy()
-            train_df = train_df["cloture"].values.reshape(-1,1)
-        scaler = train_model(model, full_model_name, train_df, scaler, WINDOW_SIZE, new_last_trained_date)
-        logger.info(f"Training {stock} model done, saving model and scaler")
-        save_model(model, MODEL_LOCATION, stock)
-        save_scaler(scaler, MODEL_LOCATION, stock)
-    
-    # TODO: Maybe send the evaluation results for all models to some sort of a dashboard that shows a graph of the models perfomance after each run of the script, idk
-    logger.info("Training script completed successfully")
 
 if __name__ == "__main__":
-    # Run the processing pipeline
-    train()
+    main()
