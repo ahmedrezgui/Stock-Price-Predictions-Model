@@ -20,6 +20,7 @@ def main(argv=None):
     parser.add_argument("--artifacts", default="artifacts/models")
     parser.add_argument("--output", default="reports/training")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--device", choices=["cpu", "cuda", "auto"], help="Explicit override, e.g. CPU-only CI")
     parser.add_argument("--mlflow-uri", help="Tracking URI; defaults to MLFLOW_TRACKING_URI")
     parser.add_argument("--mlflow-experiment", help="Defaults to MLFLOW_EXPERIMENT_NAME or stock-return-forecasting")
     parser.add_argument(
@@ -29,6 +30,8 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
     config = Config.read(args.config)
+    if args.device:
+        config = replace(config, device=args.device)
     if args.backend == "azure":
         if not args.approve_cloud_action or not args.data or not args.compute:
             parser.error("Azure submission requires --approve-cloud-action, --data and --compute")

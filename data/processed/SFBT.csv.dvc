@@ -1,0 +1,5 @@
+outs:
+- md5: 6efd9b0c419cbf4ec315f8b9d7c7d694
+  size: 304013
+  hash: md5
+  path: SFBT.csv

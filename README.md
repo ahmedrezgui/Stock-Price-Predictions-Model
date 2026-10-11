@@ -405,7 +405,107 @@ For those managed services or multiple replicas, adapt the small storage layer
 to a shared database during the Azure deployment step. Do not point multiple
 replicas at independent local files or a network-mounted SQLite file.
 
+## Market-wide local LSTM training and DVC datasets
+
+Run the complete local preparation and candidate-training pipeline:
+
+```powershell
+python -m stock_forecasting.market
+```
+
+The default universe combines `utils/constants.py`, downloaded `data/raw/*.csv`
+files and existing raw DVC pointers. This includes stocks temporarily commented
+out of the downloader list and reports missing previously tracked downloads.
+To validate/cache datasets without training, use `--prepare-only`. For a selected
+batch use `--symbols BIAT ATB`. `--as-of YYYY-MM-DD` freezes the exclusive
+completed-day cutoff. The command uses the local `sqlite:///mlflow.db` registry;
+`--mlflow-uri` overrides it. Azure registry compatibility remains a separate task.
+
+The steps are:
+
+1. Preserve the raw CSV bytes and validate each symbol independently. Normalize
+   French column names, decimal commas, dates and ordering; remove identical
+   duplicate rows. Conflicting duplicates, missing/invalid prices or volumes and
+   invalid OHLC ranges block the symbol. No prices or absent sessions are filled.
+2. Save canonical, **unscaled** daily bars as `data/processed/<SYMBOL>.csv`.
+   Persist hashes and per-symbol validation outcomes in
+   `data/processed/manifest.json`. Globally fitting a scaler here would leak future
+   data; each model instead fits its scaler on its training input rows only.
+3. Run local `dvc add` on downloaded raw CSVs, valid processed CSVs and the
+   manifest. This updates/cache-stores their `.dvc` pointers without a Git commit
+   or Azure push. Invalid raw files are still versioned as evidence.
+4. Exclude stale histories (more than 14 calendar days) and insufficient samples
+   (fewer than 252 train, 60 validation or 60 holdout samples after feature warmup
+   and label purging). Valid excluded histories remain processed for research.
+5. Train one LSTM return candidate per eligible symbol, sequentially on CUDA.
+   `configs/training.json` uses history from 2010, maximum 50 epochs, patience 10
+   and seed 7. The chronological split is 60% training / 20% validation / 20%
+   untouched holdout, separately within each stock's available history. This is
+   candidate training, not a new common-calendar architecture benchmark.
+6. Log models, fitted scalers, raw/processed dataset lineage, validation metrics
+   and learning curves to MLflow. The processed-file checksum must match its
+   preprocessing manifest before training. Registry registration is not approval:
+   candidates that fail the development baseline remain marked rejected, and
+   no deployed alias is assigned by this command.
+
+The one human-readable summary is
+[`reports/market_training/market_training_report.md`](reports/market_training/market_training_report.md).
+Machine records and restart information stay in `artifacts/market/`; weights
+stay in `artifacts/models/`. Progress is saved after every completed symbol.
+Repeating the command with identical code/configuration/data/cutoff reuses the
+existing verified training result and records the new MLflow run; changed inputs
+produce a new candidate. Unexpected training failures are reported, other stocks
+continue, and the command exits nonzero. Data exclusions are reported normally.
+CSV validation does not verify whether a symbol is an active listed equity or
+an index; production onboarding still requires checking the instrument universe.
+
+Superseded processed files/pointers for invalid or missing inputs are preserved
+under `artifacts/market/archive/` rather than left as current processed data.
+Their previous committed pointers also remain in Git history. A missing raw CSV
+keeps its existing raw pointer so you can recover it using DVC if its cached
+version is available. It cannot be trained until the raw data is supplied.
+
+For CPU-only single-stock execution, explicitly override the GPU configuration:
+
+```powershell
+python -m scripts.train_model --config configs/training.json --device cpu --data-dir data/processed --symbols BIAT
+```
+
+The existing GitHub training workflow now explicitly selects CPU. It remains
+the single-stock routine workflow, not the market-wide local GPU run.
+
+### DVC upload later
+
+Install `dvc[azure]` when preparing a new environment. The current DVC remote is
+already named `azure-blob`, points to `azure://datasets`, and references storage
+account `stockspricesdatastore`. Verify that this is the intended account and
+subscription before uploading. The `datasets` Blob container must exist and your
+identity needs Blob data access. Keep credentials out of Git.
+
+```powershell
+az login
+python -m dvc remote list
+python -m dvc status
+# After resolving missing downloads and verifying the destination:
+python -m dvc push
+```
+
+DVC's Azure remote stores content-addressed cache objects, not a browseable copy
+of `data/raw` and `data/processed`. Another machine obtains the chosen Git
+revision's `.dvc` pointers and runs `dvc pull` to reconstruct those paths. Do not
+point Azure training at an imagined `datasets/data/processed/BIAT.csv` Blob.
+Materialize the DVC revision before training, or deliberately publish a separate
+Azure ML data asset. [DVC Azure remote authentication](https://github.com/treeverse/dvc.org/blob/main/content/docs/user-guide/data-management/remote-storage/azure-blob-storage.md)
+
+Commit the code/configuration, report, dataset `.dvc` pointers and generated
+`.gitignore` changes yourself. Do not commit dataset files, model weights, the
+DVC cache, `mlflow.db` or credentials. Model bundles are already recorded in
+MLflow; this stage uses DVC for the raw and processed datasets.
+
 ## Validation and remaining work
+
+For the student-budget Azure setup, service choices and deployment prerequisites,
+follow [Azure setup for the stock forecasting project](AZURE_STUDENT_SETUP.md).
 
 ```powershell
 python -m pytest tests/forecasting -q

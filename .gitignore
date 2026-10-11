@@ -126,12 +126,16 @@ cython_debug/
 # DATA MANAGEMENT WITH DVC & AZURE BLOB STORAGE 
 
 # Ignore actual dataset files, but allow their `.dvc` pointers
-data/raw/*
-data/processed/*
+data/raw/*.csv
+data/processed/*.csv
 
 # Allow DVC metadata files to be tracked
+!data/raw/
+!data/processed/
 !data/raw/*.dvc
 !data/processed/*.dvc
+!data/raw/.gitignore
+!data/processed/.gitignore
 
 # Ignore DVC cache directory (local storage)
 .dvc/cache/

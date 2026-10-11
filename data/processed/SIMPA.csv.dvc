@@ -1,0 +1,5 @@
+outs:
+- md5: ab583d984691fad417076fc6040295f2
+  size: 122803
+  hash: md5
+  path: SIMPA.csv

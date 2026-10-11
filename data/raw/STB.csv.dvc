@@ -1,0 +1,5 @@
+outs:
+- md5: f4ce884051b505df3db2d9de2c93f3a8
+  size: 156660
+  hash: md5
+  path: STB.csv

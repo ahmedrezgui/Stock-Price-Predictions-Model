@@ -1,0 +1,5 @@
+outs:
+- md5: a62f3cb35f0995c6179f53f93c7b78fb
+  size: 167492
+  hash: md5
+  path: SIAME.csv

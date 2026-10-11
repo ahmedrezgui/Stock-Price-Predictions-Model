@@ -3,6 +3,7 @@
 from dataclasses import replace
 from hashlib import sha256
 import importlib.metadata
+import json
 from pathlib import Path
 import time
 
@@ -24,6 +25,18 @@ from .tracking import tracking_run
 def prepare(csv, config, storage_root):
     frame, metadata = normalize(read_csv(csv), config)
     metadata["source_file_sha256"] = sha256(Path(csv).read_bytes()).hexdigest()
+    preprocessing_manifest = Path(csv).parent / "manifest.json"
+    if preprocessing_manifest.exists():
+        provenance = json.loads(preprocessing_manifest.read_text(encoding="utf-8"))
+        if "preprocessing_version" in provenance:
+            entry = provenance["symbols"][config.symbol]
+            if entry.get("processed_sha256") != metadata["source_file_sha256"]:
+                raise ValueError("Processed dataset differs from its preprocessing manifest")
+            metadata.update(
+                raw_source_sha256=entry["raw_sha256"],
+                preprocessing_version=provenance["preprocessing_version"],
+                preprocessing_as_of=provenance["as_of"],
+            )
     manifest = snapshot(frame, metadata, LocalStore(storage_root))
     frame, columns = features(frame, config.feature_groups)
     frame = targets(frame, config.horizon)

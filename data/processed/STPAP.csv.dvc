@@ -1,0 +1,5 @@
+outs:
+- md5: 9d2b35d7b66c02f7efb4437bdf5bef20
+  size: 127717
+  hash: md5
+  path: STPAP.csv

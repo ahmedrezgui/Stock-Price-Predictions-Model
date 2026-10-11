@@ -4,7 +4,7 @@ Setup:
     .\.venv\Scripts\python.exe -m pip install playwright
 
 Run from the project root (uses installed Google Chrome):
-    python scripts/download_data_playwright.py --date 01-10-2026 --symbols ATB
+    python scripts/download_data.py --date 01-10-2026 --symbols ATB
 
 Use --date all for history since 2008, or omit --symbols for all configured stocks.
 For bundled Chromium: python -m playwright install chromium, then --browser chromium.

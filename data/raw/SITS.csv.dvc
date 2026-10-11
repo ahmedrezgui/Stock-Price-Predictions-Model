@@ -1,0 +1,5 @@
+outs:
+- md5: 501db3b37ec6606d90bfed8a1570301f
+  size: 106966
+  hash: md5
+  path: SITS.csv

@@ -1,0 +1,5 @@
+outs:
+- md5: ed524539f53a866a936cd29d077644a4
+  size: 91172
+  hash: md5
+  path: SAM.csv

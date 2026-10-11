@@ -1,0 +1,5 @@
+outs:
+- md5: 89e77e8883581ddb5457ce2ad3c7bab2
+  size: 113185
+  hash: md5
+  path: MAG.csv

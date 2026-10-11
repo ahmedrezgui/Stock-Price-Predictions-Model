@@ -1,0 +1,5 @@
+outs:
+- md5: 7e52a6848efbea87eea1948042eb34e1
+  size: 80984
+  hash: md5
+  path: PLAST.csv

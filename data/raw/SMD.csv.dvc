@@ -1,0 +1,5 @@
+outs:
+- md5: 3b7d288414fe38b72126b7656119d146
+  size: 31204
+  hash: md5
+  path: SMD.csv
