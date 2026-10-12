@@ -1,0 +1,5 @@
+outs:
+- md5: 3b8fea12ebc257b13ca6d9649921db27
+  size: 54922
+  hash: md5
+  path: STIP.csv

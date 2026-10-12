@@ -14,4 +14,4 @@ def create_model(stock: str, model_name: str) -> IModel:
         case "LSTM":
             return LSTMModel(stock)
         case _:
-            return NotImplementedError("The given model name is not implemented yet, please choose another one!")
+            raise NotImplementedError("The given model name is not implemented yet, please choose another one!")

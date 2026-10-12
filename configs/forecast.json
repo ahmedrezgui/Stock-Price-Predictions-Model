@@ -1,0 +1,13 @@
+{
+  "symbol": "BIAT",
+  "horizon": 1,
+  "sequence_length": 20,
+  "feature_groups": ["price", "volatility"],
+  "hidden_size": 32,
+  "epochs": 20,
+  "patience": 5,
+  "adjustment": "unverified",
+  "as_of": "2026-10-09",
+  "start": "2018-01-01",
+  "end": "2026-10-07"
+}

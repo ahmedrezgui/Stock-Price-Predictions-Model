@@ -1,0 +1,5 @@
+outs:
+- md5: b16472dfc610cdbc7d004a336df9cd64
+  size: 172455
+  hash: md5
+  path: SOPAT.csv

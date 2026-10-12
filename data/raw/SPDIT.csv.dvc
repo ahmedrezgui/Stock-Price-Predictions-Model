@@ -1,0 +1,5 @@
+outs:
+- md5: 8424bcf23c6b988b6b799e878099faaf
+  size: 121040
+  hash: md5
+  path: SPDIT.csv

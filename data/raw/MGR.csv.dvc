@@ -1,0 +1,5 @@
+outs:
+- md5: a458913242be9ad0e2670bf6b2bf0daa
+  size: 161007
+  hash: md5
+  path: MGR.csv

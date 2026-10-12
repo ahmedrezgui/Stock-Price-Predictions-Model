@@ -1,0 +1,5 @@
+outs:
+- md5: 0310e554a242450ba4a0f9de52d62d1a
+  size: 175820
+  hash: md5
+  path: SOMOC.csv

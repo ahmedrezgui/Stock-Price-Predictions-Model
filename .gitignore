@@ -73,6 +73,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Personal documentation stays local.
+/docs/
+
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
 
@@ -92,6 +95,7 @@ celerybeat-schedule
 # Environments
 .env
 .venv
+.venv-forecast/
 env/
 venv/
 ENV/
@@ -122,12 +126,16 @@ cython_debug/
 # DATA MANAGEMENT WITH DVC & AZURE BLOB STORAGE 
 
 # Ignore actual dataset files, but allow their `.dvc` pointers
-data/raw/*
-data/processed/*
+data/raw/*.csv
+data/processed/*.csv
 
 # Allow DVC metadata files to be tracked
+!data/raw/
+!data/processed/
 !data/raw/*.dvc
 !data/processed/*.dvc
+!data/raw/.gitignore
+!data/processed/.gitignore
 
 # Ignore DVC cache directory (local storage)
 .dvc/cache/
@@ -141,3 +149,18 @@ data/processed/*
 *.parquet
 *.pkl
 *.joblib
+
+# Reproducible local forecasting artifacts; publish deliberately through storage.
+artifacts/
+deployment/
+*.pt
+mlruns/
+mlflow.db
+mlflow.db-*
+.ruff_cache/
+reports/smoke/
+reports/monitoring/
+*.sqlite3
+*.sqlite3-*
+# Generated portfolio results are intentionally versionable.
+!reports/**/*.csv

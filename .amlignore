@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+.dvc
+data
+artifacts
+reports
+notebook
+deployment
+__pycache__

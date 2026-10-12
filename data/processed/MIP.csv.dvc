@@ -1,0 +1,5 @@
+outs:
+- md5: 70bb095fdeec3d1442f7efbf243b517e
+  size: 23469
+  hash: md5
+  path: MIP.csv

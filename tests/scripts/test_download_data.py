@@ -1,97 +1,164 @@
-import pytest
-from datetime import datetime, timedelta
-from unittest import mock
-
+from datetime import date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+import runpy
+import threading
+from urllib.parse import parse_qs
+from unittest.mock import MagicMock
 
-from scripts.download_data import get_dates, update_dates, download
+import pytest
 
-# -------------- Fixtures ----------------
-@pytest.fixture
-def today_date():
-    return datetime.today().date()
 
-@pytest.fixture
-def session_mock():
-    return mock.Mock()
+# Import the standalone script without initializing the scripts/ML packages.
+scraper = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts/download_data.py'))
+HEADER = scraper['HEADERS']
+ROW = 'ATB;01/10/2026;3,9;4;3,8;3,95;100'
 
-@pytest.fixture
-def dummy_response():
-    mock_resp = mock.Mock()
-    mock_resp.status_code = 200
-    mock_resp.content = b"symbole;date;ouverture;haut;bas;cloture;volume\r\nSYM1;01-01-2024;100;110;90;105;1000"
-    return mock_resp
 
-# -------------- Tests for get_dates ----------------
-class TestGetDates:
+@pytest.mark.parametrize('failure_stage', ['open_form', 'download'])
+def test_failed_periods_do_not_stop_other_periods_or_symbols(monkeypatch, tmp_path, capsys, failure_stage):
+    playwright = pytest.importorskip('playwright.sync_api')
+    manager = MagicMock()
+    browser = manager.__enter__.return_value.chromium.launch.return_value
+    monkeypatch.setattr(playwright, 'sync_playwright', lambda: manager)
+    namespace = scraper['main'].__globals__
+    periods = [(date(2024, 1, 1), date(2024, 3, 24)),
+               (date(2024, 3, 25), date(2024, 6, 16)),
+               (date(2024, 6, 17), date(2024, 7, 1))]
+    monkeypatch.setitem(namespace, 'date_ranges', lambda start, end: iter(periods))
+    monkeypatch.setattr(namespace['time'], 'sleep', lambda seconds: None)
+    open_form = MagicMock(return_value=object())
+    download = MagicMock(return_value=1)
+    # Fail an early period in each stock, then confirm later periods still run.
+    if failure_stage == 'open_form':
+        open_form.side_effect = [RuntimeError('form missing'), object(), object(),
+                                 RuntimeError('form missing'), object(), object()]
+    else:
+        download.side_effect = [playwright.TimeoutError('download timeout'), 1, 1,
+                                RuntimeError('invalid CSV'), 1, 1]
+    monkeypatch.setitem(namespace, 'open_form', open_form)
+    monkeypatch.setitem(namespace, 'download', download)
+    scraper['main'](['--date', '01-01-2024', '--symbols', 'ATB', 'BIAT',
+                     '--headless', '--output-dir', str(tmp_path)])
+    assert open_form.call_count == 6
+    assert download.call_count == (4 if failure_stage == 'open_form' else 6)
+    assert download.call_args.args[2:4] == periods[-1]
+    assert download.call_args.args[-1] == 'BIAT'
+    browser.close.assert_called_once()
+    output = capsys.readouterr()
+    assert '4 periods completed, 2 periods skipped' in output.out
+    assert 'ATB: 2024-01-01 to 2024-03-24' in output.err
+    assert 'BIAT: 2024-01-01 to 2024-03-24' in output.err
 
-    def test_get_dates_today(self, today_date):
-        """Test when start date is today's date."""
-        start_str = today_date.strftime("%d-%m-%Y")
-        start, end = get_dates(start_str)
-        assert start == today_date
-        assert end == today_date
 
-    @pytest.mark.parametrize("input_date", ["01-01-2024", "15-08-2023"])
-    def test_get_dates_past_dates(self, input_date):
-        """Test normal case with past dates."""
-        expected_start = datetime.strptime(input_date, "%d-%m-%Y").date()
-        expected_end = expected_start + timedelta(days=83)
-        start, end = get_dates(input_date)
-        assert start == expected_start
-        assert end == expected_end
+def test_keyboard_interrupt_still_cancels(monkeypatch):
+    playwright = pytest.importorskip('playwright.sync_api')
+    manager = MagicMock()
+    browser = manager.__enter__.return_value.chromium.launch.return_value
+    monkeypatch.setattr(playwright, 'sync_playwright', lambda: manager)
+    open_form = MagicMock(side_effect=KeyboardInterrupt)
+    monkeypatch.setitem(scraper['main'].__globals__, 'open_form', open_form)
+    with pytest.raises(KeyboardInterrupt):
+        scraper['main'](['--date', '01-01-2024', '--symbols', 'ATB', '--headless'])
+    open_form.assert_called_once()
+    browser.close.assert_called_once()
 
-# -------------- Tests for update_dates ----------------
-class TestUpdateDates:
 
-    def test_update_dates_normal(self):
-        """Test that update_dates shifts by +1 and +84 days."""
-        original_date = datetime(2024, 1, 1).date()
-        start, end = update_dates(original_date)
-        assert start == original_date + timedelta(days=1)
-        assert end == original_date + timedelta(days=84)
+def test_date_ranges_are_contiguous_and_capped():
+    periods = list(scraper['date_ranges'](date(2024, 1, 1), date(2024, 7, 1)))
+    assert periods[0][0] == date(2024, 1, 1)
+    assert periods[-1][1] == date(2024, 7, 1)
+    assert all((end - start).days <= 83 for start, end in periods)
+    assert all((periods[i + 1][0] - periods[i][1]).days == 1 for i in range(len(periods) - 1))
 
-# -------------- Tests for download_data ----------------
-class TestDownloadData:
 
-    @mock.patch("builtins.open", new_callable=mock.mock_open)
-    @mock.patch("os.makedirs")
-    @mock.patch("os.path.exists", return_value=False)
-    @mock.patch("os.stat")  # <--- Mock os.stat too
-    def test_download_successful(self, mock_stat, mock_exists, mock_makedirs, mock_open_file, session_mock, dummy_response):
-        """Test successful download and file creation."""
-        session_mock.post.return_value = dummy_response
-        # Mock st_size attribute to simulate empty file (size 0)
-        mock_stat.return_value.st_size = 0
+def test_csv_append_deduplicates_and_handles_bom(tmp_path):
+    destination = tmp_path / 'ATB.csv'
+    payload = f'{HEADER}\n{ROW}\n'.encode('utf-8-sig')
+    assert scraper['append_csv'](payload, destination, 'ATB') == 1
+    assert scraper['append_csv'](payload, destination, 'ATB') == 0
+    assert destination.read_text(encoding='utf-8') == f'{HEADER}\n{ROW}\n'
 
-        download(
-            "2024-01-01",
-            "2024-03-24",
-            cookies={},
-            token="dummy_token",
-            session=session_mock,
-            link="https://www.ilboursa.com/marches/download/DUMMY",
-            fileName="DUMMY.csv"
-        )
 
-    @mock.patch("os.makedirs")
-    @mock.patch("os.path.exists", return_value=True)
-    def test_download_failure(self, mock_exists, mock_makedirs, session_mock):
-        """Test failed download raises Exception."""
-        failed_response = mock.Mock()
-        failed_response.status_code = 500
-        session_mock.post.return_value = failed_response
+def test_append_to_file_without_final_newline(tmp_path):
+    destination = tmp_path / 'ATB.csv'
+    destination.write_text(HEADER, encoding='utf-8')
+    scraper['append_csv'](f'{HEADER}\n{ROW}'.encode(), destination, 'ATB')
+    assert destination.read_text(encoding='utf-8') == f'{HEADER}\n{ROW}\n'
 
-        with pytest.raises(Exception, match="❌ Failed to download file. Status code: 500"):
-            download(
-                "2024-01-01",
-                "2024-03-24",
-                cookies={},
-                token="dummy_token",
-                session=session_mock,
-                link="https://www.ilboursa.com/marches/download/DUMMY",
-                fileName="DUMMY.csv"
-            )
 
+@pytest.mark.parametrize('content', [
+    b'<html>Cloudflare: Sorry, you have been blocked</html>',
+    f'{HEADER}\nATB;missing columns'.encode(),
+    f'{HEADER}\n{ROW.replace("ATB", "OTHER")}'.encode(),
+])
+def test_invalid_response_preserves_existing_csv(tmp_path, content):
+    destination = tmp_path / 'ATB.csv'
+    destination.write_text(f'{HEADER}\n{ROW}\n', encoding='utf-8')
+    before = destination.read_bytes()
+    with pytest.raises(RuntimeError):
+        scraper['append_csv'](content, destination, 'ATB')
+    assert destination.read_bytes() == before
+
+
+def test_form_submission_and_download_in_real_browser(tmp_path):
+    playwright = pytest.importorskip('playwright.sync_api')
+    submissions = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Set-Cookie', 'session=fixture; Path=/')
+            self.end_headers()
+            self.wfile.write('''<form method="post" action="/export">
+                <input type="date" name="dtFrom">
+                <input type="date" name="dtTo">
+                <input type="hidden" name="__RequestVerificationToken" value="fixture-token">
+                <input type="hidden" name="__Invariant" value="dtFrom">
+                <input type="hidden" name="__Invariant" value="dtTo">
+                <button type="submit">Télécharger</button>
+                </form>'''.encode())
+
+        def do_POST(self):
+            fields = parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
+            submissions.append((fields, self.headers.get('Cookie')))
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv')
+            self.send_header('Content-Disposition', 'attachment; filename=ATB.csv')
+            self.end_headers()
+            self.wfile.write(f'{HEADER}\r\n{ROW}\r\n'.encode('utf-8-sig'))
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch(channel='chrome', headless=True)
+            except playwright.Error as error:
+                if 'not found' in str(error) or "doesn't exist" in str(error):
+                    pytest.skip('Google Chrome is not installed')
+                raise
+            try:
+                context = browser.new_context(accept_downloads=True)
+                page = context.new_page()
+                form = scraper['open_form'](page, f'http://127.0.0.1:{server.server_port}', interactive=False)
+                count = scraper['download'](page, form, date(2026, 10, 1), date(2026, 10, 7), tmp_path / 'ATB.csv', 'ATB')
+                assert count == 1
+                assert (tmp_path / 'ATB.csv').read_text(encoding='utf-8') == f'{HEADER}\n{ROW}\n'
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
+    fields, cookie = submissions[0]
+    assert fields['dtFrom'] == ['2026-10-01']
+    assert fields['dtTo'] == ['2026-10-07']
+    assert fields['__RequestVerificationToken'] == ['fixture-token']
+    assert fields['__Invariant'] == ['dtFrom', 'dtTo']
+    assert cookie == 'session=fixture'

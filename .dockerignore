@@ -1,0 +1,11 @@
+.git
+.venv
+.env
+.dvc
+data
+artifacts
+reports
+notebook
+__pycache__
+*.pyc
+.pytest_cache

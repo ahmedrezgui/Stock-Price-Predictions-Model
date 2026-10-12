@@ -1,0 +1,19 @@
+{
+  "symbol": "BIAT",
+  "family": "lstm",
+  "task": "return",
+  "horizon": 1,
+  "sequence_length": 20,
+  "feature_groups": [
+    "price",
+    "volatility"
+  ],
+  "hidden_size": 32,
+  "epochs": 50,
+  "patience": 10,
+  "adjustment": "unverified",
+  "as_of": null,
+  "start": "2010-01-01",
+  "end": null,
+  "device": "cuda"
+}

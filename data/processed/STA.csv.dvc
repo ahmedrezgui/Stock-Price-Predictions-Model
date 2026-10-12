@@ -1,0 +1,5 @@
+outs:
+- md5: 741274464c51601f1830638cfd3500a7
+  size: 42911
+  hash: md5
+  path: STA.csv

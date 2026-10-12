@@ -1,93 +1,69 @@
-name: Azure ML Training Pipeline
-
+name: Forecast candidate training
 on:
-  push:
-    paths:
-      - data/processed/**
-    branches:
-      - main
   workflow_dispatch:
-
-env:
-  KERAS_BACKEND: ${{ vars.KERAS_BACKEND }}
-  MODEL_NAME: ${{ vars.MODEL_NAME }}
-  WINDOW_SIZE: ${{ vars.WINDOW_SIZE }}
-  MODEL_LOCATION: ${{ vars.MODEL_LOCATION }}
-  MODEL_EVAL_THRESHHOLD: ${{ vars.MODEL_EVAL_THRESHHOLD }}
-  AZURE_RESOURCE_GROUP:   ${{ secrets.AZURE_RESOURCE_GROUP }}
-  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  AZURE_ML_WORKSPACE:     ${{ secrets.AZURE_ML_WORKSPACE }}
-  SMTP_SERVER: ${{ vars.SMTP_SERVER }}
-  SMTP_PORT: ${{ vars.SMTP_PORT }}
-  SMTP_SENDER_EMAIL: ${{ vars.SMTP_SENDER_EMAIL }}
-  SMTP_SENDER_PASSWORD: ${{ secrets.SMTP_SENDER_PASSWORD }}
-  EMAIL_RECIPIENT: ${{ vars.EMAIL_RECIPIENT }}
-  LANGSMITH_API_KEY:      ${{ secrets.LANGSMITH_API_KEY }}
-  GOOGLE_API_KEY:         ${{ secrets.GOOGLE_API_KEY }}
-  GOOGLE_API_KEY_1:       ${{ secrets.GOOGLE_API_KEY_1 }}
-  USER_AGENT:             ${{ vars.USER_AGENT }}
-  GENERATIVE_MODEL:       ${{ vars.GENERATIVE_MODEL }}
-  SIMPLE_TASK_MODEL:      ${{ vars.SIMPLE_TASK_MODEL }}
-  EMBEDDING_MODEL:        ${{ vars.EMBEDDING_MODEL }}
-  PINECONE_API_KEY:       ${{ secrets.PINECONE_API_KEY }}
-  INDEX_NAME:             ${{ secrets.INDEX_NAME }}
-
+  workflow_call:
+    inputs:
+      data_revision:
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: forecast-training-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   train-model:
+    environment: azure-approved
     runs-on: ubuntu-24.04
-
+    timeout-minutes: 45
+    env:
+      CUDA_VISIBLE_DEVICES: '-1'
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-
-      - name: Set Up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
         with:
-          python-version: "3.11.0"
-
-      - name: Install Conda 23.5.2
-        run: |
-          wget https://repo.anaconda.com/miniconda/Miniconda3-py311_23.5.2-0-Linux-x86_64.sh -O miniconda.sh
-          bash miniconda.sh -b -p $HOME/miniconda
-          echo "$HOME/miniconda/bin" >> $GITHUB_PATH
-
-      - name: Create Conda Environment
-        shell: bash -l {0}
-        run: |
-          source $HOME/miniconda/bin/activate
-          conda init bash
-          conda env create --file environment.yml --name Stock_Price_Prediction
-
-      - name: Authenticate with Azure
-        uses: azure/login@v1
+          ref: ${{ inputs.data_revision || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install '.[dev,tracking]' 'dvc[azure]' azure-ai-ml azure-identity azure-storage-blob
+      - name: Core correctness before training
+        run: pytest tests/forecasting tests/scripts/test_train_model.py -q
+      - uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Pull Latest Dataset from Azure Blob Storage
-        shell: bash -l {0}
-        run: |
-          source $HOME/miniconda/bin/activate
-          conda activate Stock_Price_Prediction
-          dvc pull
-
-      - name: Run Training Job
-        shell: bash -l {0}
+      - name: Pull exact checked-out data revision
+        run: dvc pull
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            artifacts/models
+            reports/training
+          key: forecast-state-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: forecast-state-${{ github.ref_name }}-
+      - name: Train and evaluate on GitHub CPU runner
         env:
-          AZURE_RESOURCE_GROUP:   ${{ secrets.AZURE_RESOURCE_GROUP }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_ML_WORKSPACE:     ${{ secrets.AZURE_ML_WORKSPACE }}
-        run: |
-          source $HOME/miniconda/bin/activate
-          conda activate Stock_Price_Prediction
-          
-          # Set PYTHONPATH to include the project root
-          export PYTHONPATH=$PYTHONPATH:$(pwd)
-          
-          # Debug: Show the directory structure and PYTHONPATH
-          echo "Current directory structure:"
-          ls -la
-          echo "PYTHONPATH: $PYTHONPATH"
-
-          # Run the training script
-          echo "Training model on Azure ML"
-          python -m scripts.train_model
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI || 'sqlite:///mlflow.db' }}
+          MLFLOW_TRACKING_TOKEN: ${{ secrets.MLFLOW_TRACKING_TOKEN }}
+          MLFLOW_EXPERIMENT_NAME: stock-return-forecasting
+        run: python -m scripts.train_model --config configs/training.json --device cpu
+      - uses: actions/cache/save@v4
+        with:
+          path: |
+            artifacts/models
+            reports/training
+          key: forecast-state-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Retain candidate bundles and evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forecast-training-${{ github.run_id }}
+          path: |
+            artifacts/models
+            reports/training
+            data/raw
+            mlflow.db
+            mlruns
+          retention-days: 30

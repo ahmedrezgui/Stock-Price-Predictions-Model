@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-return-forecasting"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26,<3", "pandas>=2.1,<4", "scikit-learn>=1.4,<2",
+  "scipy>=1.11,<2", "statsmodels>=0.14,<0.16", "torch>=2.2,<3",
+  "matplotlib>=3.8,<4", "pyarrow>=15", "fastapi>=0.100,<1",
+  "pydantic>=2.6,<3", "uvicorn>=0.30,<1", "exchange-calendars>=4.5,<5"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5", "httpx>=0.27,<1", "ruff>=0.9"]
+tracking = ["mlflow>=2.15,<4", "httpx>=0.27,<1"]
+azure = ["azure-ai-ml>=1.20,<2", "azure-identity>=1.17,<2", "azure-storage-blob>=12.20,<13", "mlflow>=2.15,<4", "azureml-mlflow>=1.57"]
+
+[project.scripts]
+stock-forecast = "stock_forecasting.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["stock_forecasting*", "src", "src.prediction_model*", "enums*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

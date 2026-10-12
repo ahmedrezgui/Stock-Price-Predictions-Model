@@ -1,59 +1,58 @@
-from unittest.mock import patch, MagicMock, mock_open
-import os
-import pandas as pd
-import numpy as np
+import json
+import pytest
+from scripts import train_model
+from stock_forecasting.config import Config
 
-from pathlib import Path
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-@patch("scripts.train_model.evaluate")
-@patch("builtins.open", new_callable=mock_open)
-@patch("os.path.exists")
-@patch("os.listdir")
-@patch("os.path.join", side_effect=lambda *args: "/".join(args))
-@patch("subprocess.run")
-@patch("pandas.read_csv")
-@patch("src.handlers.model_handler.get_or_create_model")
-@patch("src.handlers.model_handler.save_model")
-@patch("src.handlers.scaler_handler.get_or_create_scaler")
-@patch("src.handlers.scaler_handler.save_scaler")
-@patch("utils.train_test_utils.train_model")
-@patch("dotenv.load_dotenv")
-@patch.dict(os.environ, {"WINDOW_SIZE": "5", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL", "MODEL_EVAL_THRESHHOLD": "10"})
-def test_train_function(
-    mock_dotenv, mock_train_model, mock_save_scaler, mock_get_scaler,
-    mock_save_model, mock_get_model, mock_read_csv, mock_subprocess_run,
-    mock_join, mock_listdir, mock_exists, mock_open_file, mock_evaluate
-):
-    from scripts.train_model import train
+def config_file(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(Config(symbol="TEST", device="cpu").to_dict()))
+    return path
 
-    mock_listdir.return_value = ["AAPL.csv.dvc"]
-    mock_exists.side_effect = lambda path: not path.endswith(".dvc")
 
-    df = pd.DataFrame({
-        "date": pd.date_range(start="2020-01-01", periods=20),
-        "cloture": np.random.rand(20)
-    })
-    mock_read_csv.return_value = df
+def test_training_script_records_each_symbol_and_continues_failures(tmp_path, monkeypatch):
+    calls = []
 
-    dummy_model = MagicMock()
-    dummy_model.get_last_trained_date.return_value = pd.to_datetime("2020-01-10")
-    mock_get_model.return_value = dummy_model
+    def candidate(data, config, *args):
+        calls.append((data.name, config.symbol))
+        if config.symbol == "BAD":
+            raise ValueError("Insufficient history")
+        return {"symbol": config.symbol, "status": "rejected"}
 
-    dummy_scaler = MagicMock()
-    mock_get_scaler.return_value = dummy_scaler
-    mock_train_model.return_value = dummy_scaler
+    monkeypatch.setattr(train_model, "train_candidate", candidate)
+    output = tmp_path / "reports"
+    with pytest.raises(SystemExit) as error:
+        train_model.main(["--config", str(config_file(tmp_path)), "--symbols", "BAD", "TEST", "--output", str(output)])
+    assert error.value.code == 1
+    assert calls == [("BAD.csv", "BAD"), ("TEST.csv", "TEST")]
+    report = json.loads((output / "run.json").read_text())
+    assert [entry["status"] for entry in report] == ["failed", "rejected"]
 
-    mock_evaluate.return_value = {"AAPL": 1}
 
-    # --- Call the function ---
-    train()
+def test_azure_submission_requires_explicit_flag(tmp_path, monkeypatch):
+    import stock_forecasting.azure as azure
 
-    # --- Assertions ---
-    mock_dotenv.assert_called()
-    mock_read_csv.assert_called_once()
-    mock_get_model.assert_called_once_with("AAPL", "LSTM", "LOCAL")
-    mock_train_model.assert_called_once()
-    mock_save_model.assert_called_once()
-    mock_save_scaler.assert_called_once()
+    def unexpected(*args):
+        pytest.fail("Azure must not be contacted")
+
+    monkeypatch.setattr(azure, "submit_training", unexpected)
+    with pytest.raises(SystemExit) as error:
+        train_model.main(
+            [
+                "--config",
+                str(config_file(tmp_path)),
+                "--backend",
+                "azure",
+                "--data",
+                "azureml:data:1",
+                "--compute",
+                "cpu",
+            ]
+        )
+    assert error.value.code == 2
+
+
+def test_single_file_rejects_multiple_symbols(tmp_path):
+    with pytest.raises(SystemExit) as error:
+        train_model.main(["--config", str(config_file(tmp_path)), "--data", "some.csv", "--symbols", "A", "B"])
+    assert error.value.code == 2

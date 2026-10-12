@@ -1,0 +1,5 @@
+outs:
+- md5: d8b60d4d40ab2883b37ed21febb69d7a
+  size: 287460
+  hash: md5
+  path: STAR.csv

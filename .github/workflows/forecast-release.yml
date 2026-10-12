@@ -1,0 +1,130 @@
+name: Release gated forecasting service
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Exact MLflow registry version under stock-BIAT-return-h1
+        required: true
+        type: string
+      data_run_id:
+        description: Training workflow run containing the latest evaluation CSV
+        required: true
+        type: string
+      bootstrap:
+        description: First deployment only; fresh baseline evidence is still required
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+  actions: read
+# All deployment writers must use this serial queue; MLflow aliases have no compare-and-swap.
+concurrency:
+  group: forecast-release
+  cancel-in-progress: false
+jobs:
+  release:
+    environment: azure-approved
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_TOKEN: ${{ secrets.MLFLOW_TRACKING_TOKEN }}
+      FORECAST_API_KEY: ${{ secrets.FORECAST_API_KEY }}
+      IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install '.[tracking]'
+      - name: Require the shared registry
+        run: |
+          test -n "$MLFLOW_TRACKING_URI"
+          case "$MLFLOW_TRACKING_URI" in sqlite:*|file:*) exit 1 ;; esac
+      - uses: actions/download-artifact@v4
+        with:
+          name: forecast-training-${{ inputs.data_run_id }}
+          run-id: ${{ inputs.data_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: release-input
+      - name: Compare exact candidate with deployed model
+        id: gate
+        env:
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from mlflow import MlflowClient
+          from stock_forecasting.release_gate import run_gate
+          result = run_gate(MlflowClient(), "stock-BIAT-return-h1", os.environ["CANDIDATE_VERSION"],
+                            "release-input/data/raw/BIAT.csv", bootstrap=os.environ["BOOTSTRAP"] == "true")
+          print(json.dumps(result, indent=2))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
+              stream.write("run_id=" + result["gate_run_id"] + "\n")
+          if result["decision"] != "passed":
+              raise SystemExit(1)
+          PY
+      - name: Package only the evaluated weights and data
+        env:
+          GATE_RUN_ID: ${{ steps.gate.outputs.run_id }}
+        run: python -m stock_forecasting.release --mlflow-uri "$MLFLOW_TRACKING_URI" --gate-run-id "$GATE_RUN_ID" --data release-input/data/raw --output deployment
+      - name: Build and check serving image
+        run: |
+          docker build --target packaged -t forecast-release .
+          docker run -d --name forecast-smoke -p 8000:8000 forecast-release
+          for attempt in $(seq 1 30); do
+            if curl --fail http://localhost:8000/ready; then break; fi
+            sleep 2
+          done
+          curl --fail http://localhost:8000/ready
+          docker stop forecast-smoke
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publish gated image
+        env:
+          REPOSITORY: ${{ vars.FORECAST_IMAGE_REPOSITORY }}
+        run: |
+          test -n "$REPOSITORY"
+          docker tag forecast-release "$REPOSITORY:$IMAGE_TAG"
+          docker push "$REPOSITORY:$IMAGE_TAG"
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Recheck evidence immediately before deployment
+        env:
+          GATE_RUN_ID: ${{ steps.gate.outputs.run_id }}
+        run: |
+          python - <<'PY'
+          import os
+          from mlflow import MlflowClient
+          from stock_forecasting.release_gate import verify_gate
+          verify_gate(MlflowClient(), os.environ["GATE_RUN_ID"], "configs/release_policy.json", "release-input/data/raw/BIAT.csv")
+          PY
+      - name: Update existing forecasting App Service
+        env:
+          RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          APP_NAME: ${{ secrets.AZURE_FORECAST_APP_NAME }}
+          REPOSITORY: ${{ vars.FORECAST_IMAGE_REPOSITORY }}
+          MONITOR_DB: ${{ vars.FORECAST_MONITOR_DB }}
+        run: |
+          test -n "$APP_NAME"
+          test -n "$FORECAST_API_KEY"
+          test -n "$MONITOR_DB"
+          az webapp config appsettings set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --settings FORECAST_ENV=production FORECAST_API_KEY="$FORECAST_API_KEY" FORECAST_MONITOR_DB="$MONITOR_DB" --output none
+          az webapp config container set --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --docker-custom-image-name "$REPOSITORY:$IMAGE_TAG" --docker-registry-server-url https://index.docker.io
+          az webapp restart --name "$APP_NAME" --resource-group "$RESOURCE_GROUP"
+      - name: Verify served version before updating deployed alias
+        env:
+          APP_NAME: ${{ secrets.AZURE_FORECAST_APP_NAME }}
+          GATE_RUN_ID: ${{ steps.gate.outputs.run_id }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if python -m stock_forecasting.deployment --mlflow-uri "$MLFLOW_TRACKING_URI" --gate-run-id "$GATE_RUN_ID" --endpoint "https://$APP_NAME.azurewebsites.net"; then exit 0; fi
+            sleep 10
+          done
+          exit 1

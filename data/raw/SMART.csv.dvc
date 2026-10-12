@@ -1,0 +1,5 @@
+outs:
+- md5: 5e65f35cf9ba25a068cead9649ba3b41
+  size: 83258
+  hash: md5
+  path: SMART.csv

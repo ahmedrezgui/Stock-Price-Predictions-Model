@@ -22,16 +22,67 @@ def test_split_dataset():
     assert len(test_df) == 3
 
 
+@pytest.mark.parametrize('one_dimensional', [False, True])
+def test_train_and_evaluate_numpy_price_series(one_dimensional):
+    from src import ARIMAModel
+
+    prices = np.arange(100, dtype=float)
+    if not one_dimensional:
+        prices = prices.reshape(-1, 1)
+    arima = Mock(spec=ARIMAModel)
+    recurrent = Mock(spec=IModel)
+    models = {'ARIMA': (arima, prices, prices), 'GRU': (recurrent, prices, prices)}
+    scalers = train(models, window_size=60)
+    arima_x, arima_y, _ = arima.train.call_args.args
+    assert arima_x.shape == arima_y.shape == (100,)
+    x, y, _ = recurrent.train.call_args.args
+    assert x.shape == (40, 60, 1)
+    assert y.shape == (40,)
+    np.testing.assert_allclose(y, np.arange(60, 100) / 99)
+    evaluate(models, ValidationMetricEnum.RMSE, scalers)
+    eval_x, eval_y, _, _ = recurrent.evaluate.call_args.args
+    np.testing.assert_allclose(eval_x, x)
+    np.testing.assert_allclose(eval_y, y)
+
+
+def test_training_and_evaluation_exclude_stock_identifiers_and_dates():
+    df = pd.DataFrame({
+        'symbole': ['ATB'] * 100,
+        'date': pd.date_range('2026-01-01', periods=100),
+        'ouverture': np.arange(100, dtype=float) + 1,
+        'cloture': np.arange(100, dtype=float) + 2,
+        'volume': np.arange(100) + 10,
+    })
+    original = df.copy()
+    model = Mock(spec=IModel)
+    model.evaluate.return_value = 0.1
+    scalers = train({'GRU': (model, df, df)}, window_size=60)
+    scaler = scalers['GRU']
+    assert list(scaler.feature_names_in_) == ['ouverture', 'cloture', 'volume']
+    x_train, y_train, _ = model.train.call_args.args
+    assert x_train.shape == (40, 60, 3)
+    assert y_train.shape == (40,)
+    np.testing.assert_allclose(y_train, scaler.transform(df[list(scaler.feature_names_in_)])[60:, 1])
+    # Column order at evaluation must match training, even if the input changes order.
+    reordered = df[['volume', 'symbole', 'cloture', 'date', 'ouverture']]
+    result = evaluate({'GRU': (model, df, reordered)}, ValidationMetricEnum.RMSE, scalers)
+    assert result == {'GRU': 0.1}
+    x_test, y_test, _, _ = model.evaluate.call_args.args
+    np.testing.assert_allclose(x_test, x_train)
+    np.testing.assert_allclose(y_test, y_train)
+    pd.testing.assert_frame_equal(df, original)
+
+
 def test_get_features_target_from_dataset_regular_case():
     arr = np.array([[i] for i in range(100)])
-    X, Y = get_features_target_from_dataset(arr, False, closeColIdx=0, isArimaContext=False, window=10)
+    X, Y = get_features_target_from_dataset(arr, closeColIdx=0, isArimaContext=False, window=10)
     assert X.shape[0] == 90
     assert X.shape[1:] == (10, 1)
     assert Y.shape[0] == 90
 
 def test_get_features_target_from_dataset_arima_context():
     arr = np.array([[i] for i in range(10)])
-    X, Y = get_features_target_from_dataset(arr, False, closeColIdx=0, isArimaContext=True)
+    X, Y = get_features_target_from_dataset(arr, closeColIdx=0, isArimaContext=True)
     assert isinstance(X, np.ndarray)
     assert (X == Y).all()
 

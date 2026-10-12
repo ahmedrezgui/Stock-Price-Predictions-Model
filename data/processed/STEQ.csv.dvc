@@ -1,0 +1,5 @@
+outs:
+- md5: 57955540abb7d4fc49f602ebad60f012
+  size: 22594
+  hash: md5
+  path: STEQ.csv

@@ -1,0 +1,5 @@
+outs:
+- md5: 9c713b9d6e29e889bd2fea83e0532a90
+  size: 123839
+  hash: md5
+  path: SERVI.csv
