@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 
 
-def verify_serving(endpoint, metadata):
+def verify_serving(endpoint, metadata, expected_status=None, approval_id=None):
     url = urlparse(endpoint)
     if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
         raise ValueError("A trusted HTTPS serving endpoint is required")
@@ -34,6 +34,13 @@ def verify_serving(endpoint, metadata):
         response.raise_for_status()
         if response.json().get("model_version") != expected:
             raise ValueError("Serving model differs from the expected registry version")
+        status = response.json().get("deployment_status")
+        if status not in ("production_approved", "manual_initial_release_approved"):
+            raise ValueError("An unapproved preview cannot be recorded as a production deployment")
+        if expected_status and status != expected_status:
+            raise ValueError("Serving approval does not match this release")
+        if approval_id and response.json().get("approval_id") != approval_id:
+            raise ValueError("Serving authorization differs from the owner-approved release")
 
 
 def confirm_deployment(client, gate_run_id, endpoint, policy_path="configs/release_policy.json"):
@@ -51,8 +58,13 @@ def confirm_deployment(client, gate_run_id, endpoint, policy_path="configs/relea
         "verified_at": datetime.now(timezone.utc).isoformat(),
     }
     TrackingRun(client, gate_run_id).document(receipt, "deployment.json")
-    client.set_registered_model_tag(report["registry_name"], "deployment_endpoint", endpoint)
-    client.set_registered_model_alias(report["registry_name"], "deployed", report["candidate_version"])
+    if hasattr(client, "confirm"):
+        client.confirm(
+            report["registry_name"], report["candidate_version"], report["deployed_version"], endpoint, gate_run_id
+        )
+    else:
+        client.set_registered_model_tag(report["registry_name"], "deployment_endpoint", endpoint)
+        client.set_registered_model_alias(report["registry_name"], "deployed", report["candidate_version"])
     client.set_model_version_tag(
         report["registry_name"], report["candidate_version"], "deployment_gate_run_id", gate_run_id
     )
@@ -65,14 +77,18 @@ def main():
     parser.add_argument("--gate-run-id", required=True)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--policy", default="configs/release_policy.json")
+    parser.add_argument("--portfolio", help="Check retained stocks before confirming a shared API update")
     args = parser.parse_args()
-    from mlflow import MlflowClient
+    from .azure_registry import registry_client
 
+    client = registry_client(args.mlflow_uri)
+    if args.portfolio:
+        from .portfolio import verify_retained
+
+        verify_retained(client, args.portfolio, args.endpoint)
     print(
         json.dumps(
-            confirm_deployment(
-                MlflowClient(tracking_uri=args.mlflow_uri), args.gate_run_id, args.endpoint, args.policy
-            ),
+            confirm_deployment(client, args.gate_run_id, args.endpoint, args.policy),
             indent=2,
         )
     )

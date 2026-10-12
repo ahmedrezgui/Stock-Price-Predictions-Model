@@ -32,9 +32,10 @@ def train_candidate(
         result = _train_candidate(csv, config, root, output, force, refit_production, tracking)
     if tracking.client:
         from .model_registry import register_candidate
+        from .azure_registry import registry_client
 
         result["registered_model"] = register_candidate(
-            tracking.client, tracking.run_id, Path(root) / result["model_version"]
+            registry_client(tracking.client.tracking_uri), tracking.run_id, Path(root) / result["model_version"]
         )
     return result
 

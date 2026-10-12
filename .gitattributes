@@ -1,0 +1,4 @@
+# These immutable documents are hashed; keep their bytes stable across Windows/Linux checkouts.
+/configs/initial_release.json -text
+/configs/release_policy.json -text
+/configs/release_policies/*.json -text

@@ -123,7 +123,10 @@ def download(page, form, start, end, destination, symbol):
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Scrape ilboursa stock history with Playwright.')
     parser.add_argument('--date', required=True, help='Start date: dd-mm-yyyy or all')
-    parser.add_argument('--symbols', nargs='+', choices=SYMBOLS, default=SYMBOLS,
+    raw = PROJECT_ROOT / 'data/raw'
+    known_symbols = sorted(set(SYMBOLS) | {p.stem for p in raw.glob('*.csv')}
+                           | {p.name.removesuffix('.csv.dvc') for p in raw.glob('*.csv.dvc')})
+    parser.add_argument('--symbols', nargs='+', choices=known_symbols, default=SYMBOLS,
                         metavar='SYMBOL', help='Stock symbols, e.g. ATB BIAT; defaults to all configured stocks')
     parser.add_argument('--browser', choices=['chrome', 'msedge', 'chromium'], default='chrome')
     parser.add_argument('--headless', action='store_true', help='Disable the visible browser and manual verification')
@@ -171,6 +174,7 @@ def main(argv=None):
                 print('Failed periods:', file=sys.stderr)
                 for failure in failed_periods:
                     print(f'  {failure}', file=sys.stderr)
+                raise RuntimeError('Some download periods failed; do not publish incomplete refreshed data.')
         finally:
             browser.close()
 

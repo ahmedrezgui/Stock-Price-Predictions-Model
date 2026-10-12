@@ -128,6 +128,7 @@ cython_debug/
 # Ignore actual dataset files, but allow their `.dvc` pointers
 data/raw/*.csv
 data/processed/*.csv
+data/processed/manifest.json
 
 # Allow DVC metadata files to be tracked
 !data/raw/
@@ -164,3 +165,8 @@ reports/monitoring/
 *.sqlite3-*
 # Generated portfolio results are intentionally versionable.
 !reports/**/*.csv
+
+# Azure setup and deployment guides stay local.
+/API_DEPLOYMENT.md
+/AZURE_OPERATIONS.md
+/AZURE_STUDENT_SETUP.md

@@ -19,6 +19,11 @@ jobs:
     timeout-minutes: 45
     env:
       CUDA_VISIBLE_DEVICES: '-1'
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_ML_WORKSPACE: ${{ vars.AZURE_ML_WORKSPACE }}
+      AZURE_STORAGE_ACCOUNT_URL: ${{ vars.AZURE_STORAGE_ACCOUNT_URL }}
+      FORECAST_REGISTRY_CONTAINER: forecast-registry
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,7 +33,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install '.[dev,tracking]' 'dvc[azure]' azure-ai-ml azure-identity azure-storage-blob
+      - run: pip install '.[dev,azure]' 'dvc[azure]'
       - name: Core correctness before training
         run: pytest tests/forecasting tests/scripts/test_train_model.py -q
       - uses: azure/login@v1

@@ -239,11 +239,9 @@ def main():
     parser.add_argument("--policy", default="configs/release_policy.json")
     parser.add_argument("--bootstrap", action="store_true", help="First deployment only; still requires fresh evidence")
     args = parser.parse_args()
-    from mlflow import MlflowClient
+    from .azure_registry import registry_client
 
-    result = run_gate(
-        MlflowClient(tracking_uri=args.mlflow_uri), args.name, args.version, args.data, args.policy, args.bootstrap
-    )
+    result = run_gate(registry_client(args.mlflow_uri), args.name, args.version, args.data, args.policy, args.bootstrap)
     print(json.dumps(result, indent=2))
     if result["decision"] != "passed":
         raise SystemExit(1)

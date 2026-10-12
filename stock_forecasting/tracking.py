@@ -55,8 +55,9 @@ class TrackingRun:
 
     def tags(self, values):
         if self.client:
-            for key, value in values.items():
-                self.client.set_tag(self.run_id, key, str(value))
+            from mlflow.entities import RunTag
+
+            self.client.log_batch(self.run_id, tags=[RunTag(str(key), str(value)) for key, value in values.items()])
 
     def document(self, values, name):
         if self.client:
@@ -90,8 +91,19 @@ class TrackingRun:
         if history and all("validation_loss" in epoch for epoch in history):
             best = min(history, key=lambda epoch: epoch["validation_loss"])
             self.metrics({"best_epoch": best["epoch"]}, "training")
-        for epoch in history:
-            self.metrics({k: v for k, v in epoch.items() if k != "epoch"}, "training", epoch["epoch"])
+        if self.client:
+            from mlflow.entities import Metric
+            import time
+
+            timestamp = int(time.time() * 1000)
+            metrics = [
+                Metric(key, value, timestamp, int(epoch["epoch"]))
+                for epoch in history
+                for key, value in finite_metrics({k: v for k, v in epoch.items() if k != "epoch"}, "training").items()
+            ]
+            # Keep every epoch while avoiding one network round trip per epoch.
+            for start in range(0, len(metrics), 1000):
+                self.client.log_batch(self.run_id, metrics=metrics[start : start + 1000])
         self.document(history, "history.json")
 
 

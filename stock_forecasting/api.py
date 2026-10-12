@@ -37,6 +37,8 @@ class PredictionRequest(BaseModel):
 
 
 class PredictionResponse(BaseModel):
+    deployment_status: str = "unapproved"
+    approval_id: str | None = None
     forecast_id: str | None = None
     symbol: str
     model: str
@@ -63,8 +65,13 @@ def cached_bundle(path: str):
     return load_bundle(path)
 
 
-def predict_bundle(bundle_path, data_root, request, monitor_path=None):
+def predict_bundle(
+    bundle_path, data_root, request, monitor_path=None, deployment_status="unapproved", approval_id=None
+):
     try:
+        from .cloud_storage import refresh_data
+
+        refresh_data(data_root, request.symbol)
         model, scaler, meta = cached_bundle(str(Path(bundle_path).resolve()))
         c = replace(model.config, start=None, end=None, as_of=None)
         frame, data_meta = normalize(read_csv(Path(data_root) / f"{request.symbol}.csv"), c)
@@ -92,6 +99,8 @@ def predict_bundle(bundle_path, data_root, request, monitor_path=None):
         if implied is not None and not np.isfinite(implied):
             raise ValueError("Nonfinite implied price")
         response = PredictionResponse(
+            deployment_status=deployment_status,
+            approval_id=approval_id,
             symbol=request.symbol,
             model=c.family,
             model_version=meta["model_version"],
@@ -114,7 +123,7 @@ def predict_bundle(bundle_path, data_root, request, monitor_path=None):
                 response.forecast_id = save_forecast(
                     monitor_path, response.model_dump(), c, float(frame.close.iloc[-1])
                 )
-            except (OSError, sqlite3.Error, ValueError):
+            except Exception:
                 logger.exception("Forecast monitoring persistence failed")
                 raise HTTPException(503, "Forecast could not be recorded; inspect monitoring storage") from None
         return response
@@ -134,6 +143,15 @@ def create_app(model_root=None, data_root=None, monitor_path=None):
     app = FastAPI(title="Stock return forecasting", version="1.0.0")
 
     def monitoring_ready():
+        if os.getenv("FORECAST_MONITOR_BACKEND", "sqlite") == "azure":
+            from .cloud_storage import monitoring_ready as remote_ready
+
+            try:
+                remote_ready()
+                return
+            except Exception:
+                logger.exception("Remote monitoring unavailable")
+                raise HTTPException(503, "Remote monitoring storage unavailable") from None
         if (
             os.getenv("FORECAST_ENV", "local") != "local"
             and monitor_path is None
@@ -235,10 +253,13 @@ def create_app(model_root=None, data_root=None, monitor_path=None):
         monitoring_ready()
         for entry in entries:
             try:
+                from .cloud_storage import refresh_data
+
+                refresh_data(data, entry["symbol"])
                 cached_bundle(entry["path"])
                 if not (data / f"{entry['symbol']}.csv").is_file():
                     raise ValueError("Missing data")
-            except (ValueError, KeyError, RuntimeError, OSError):
+            except Exception:
                 raise HTTPException(503, "A model or its data is unavailable") from None
         return {"status": "ready", "models": len(entries)}
 
@@ -273,7 +294,17 @@ def create_app(model_root=None, data_root=None, monitor_path=None):
         if len(matches) != 1:
             raise HTTPException(409, "Specify model_version from /models; multiple evaluated versions exist")
         monitoring_ready()
-        return predict_bundle(matches[0]["path"], data, request, monitor_path=monitor)
+        state = read_registry(root)
+        key = f"{request.symbol}-{request.model}-{request.task}-h{request.horizon}"
+        approval = state.get("approvals", {}).get(key, {})
+        return predict_bundle(
+            matches[0]["path"],
+            data,
+            request,
+            monitor_path=monitor,
+            deployment_status=approval.get("status", state.get("deployment_status", "unapproved")),
+            approval_id=approval.get("approval_id", state.get("initial_approval_sha256")),
+        )
 
     return app
 

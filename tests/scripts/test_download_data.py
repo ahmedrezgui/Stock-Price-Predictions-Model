@@ -38,8 +38,9 @@ def test_failed_periods_do_not_stop_other_periods_or_symbols(monkeypatch, tmp_pa
                                 RuntimeError('invalid CSV'), 1, 1]
     monkeypatch.setitem(namespace, 'open_form', open_form)
     monkeypatch.setitem(namespace, 'download', download)
-    scraper['main'](['--date', '01-01-2024', '--symbols', 'ATB', 'BIAT',
-                     '--headless', '--output-dir', str(tmp_path)])
+    with pytest.raises(RuntimeError, match='Some download periods failed'):
+        scraper['main'](['--date', '01-01-2024', '--symbols', 'ATB', 'BIAT',
+                         '--headless', '--output-dir', str(tmp_path)])
     assert open_form.call_count == 6
     assert download.call_count == (4 if failure_stage == 'open_form' else 6)
     assert download.call_args.args[2:4] == periods[-1]

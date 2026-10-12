@@ -7,7 +7,7 @@ COPY src/__init__.py /app/src/__init__.py
 COPY src/prediction_model /app/src/prediction_model
 COPY enums /app/enums
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir .
+    && pip install --no-cache-dir . azure-identity azure-storage-blob
 COPY configs /app/configs
 RUN useradd --create-home forecast && mkdir -p /app/artifacts/models /app/data/raw \
     && chown -R forecast:forecast /app
