@@ -19,6 +19,8 @@ def bundle_digest(path):
 def register_candidate(client, run_id, bundle):
     """Register uploaded weights, never a benchmark run containing only metrics."""
     bundle = Path(bundle)
+    if hasattr(client, "register_bundle"):
+        return client.register_bundle(run_id, bundle)
     model, _, metadata = load_bundle(bundle)
     run = client.get_run(run_id)
     if run.info.status != "FINISHED" or run.data.tags.get("workflow") != "training":

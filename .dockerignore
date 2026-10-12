@@ -9,3 +9,11 @@ notebook
 __pycache__
 *.pyc
 .pytest_cache
+mlruns
+*.db
+*.db-*
+*.sqlite3
+*.sqlite3-*
+.env.*
+tests
+docs

@@ -1,0 +1,39 @@
+name: Reconcile cloud forecasts
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 18 * * 1-5'
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: forecast-production-monitoring
+  cancel-in-progress: false
+jobs:
+  monitor:
+    if: vars.FORECAST_MONITORING_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      AZURE_STORAGE_ACCOUNT_URL: ${{ vars.AZURE_STORAGE_ACCOUNT_URL }}
+      FORECAST_DATA_CONTAINER: forecast-serving
+      FORECAST_MONITOR_CONTAINER: forecast-monitoring
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install '.[azure]'
+      - run: python -m stock_forecasting.cloud monitor --roster configs/initial_release.json --mlflow-uri "$MLFLOW_TRACKING_URI"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forecast-production-monitoring-${{ github.run_id }}
+          path: reports/monitoring/monitoring_report.md

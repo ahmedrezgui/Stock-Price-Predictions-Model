@@ -27,7 +27,7 @@ def package_release(data, output, client=None, gate_run_id=None, policy_path="co
     version = metadata["model_version"]
     shutil.copytree(source, output / "models" / version)
     shutil.copy2(csv, output / "data" / csv.name)
-    state = {"active": {identity(model.config): version}, "history": []}
+    state = {"active": {identity(model.config): version}, "history": [], "deployment_status": "production_approved"}
     (output / "models/active.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
     (output / "release.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return output
@@ -40,14 +40,19 @@ def main():
     parser.add_argument("--mlflow-uri", required=True)
     parser.add_argument("--gate-run-id", required=True)
     parser.add_argument("--policy", default="configs/release_policy.json")
+    parser.add_argument("--retain", help="Roster whose other deployed symbols must remain in the image")
     args = parser.parse_args()
-    from mlflow import MlflowClient
+    from .azure_registry import registry_client
 
-    print(
-        package_release(
-            args.data, args.output, MlflowClient(tracking_uri=args.mlflow_uri), args.gate_run_id, args.policy
-        )
-    )
+    client = registry_client(args.mlflow_uri)
+    print(package_release(args.data, args.output, client, args.gate_run_id, args.policy))
+    if args.retain:
+        import os
+        from .portfolio import retain_deployed
+        from .model_registry import read_gate
+
+        os.environ["FORECAST_DATA_BACKEND"] = "azure"
+        retain_deployed(client, args.retain, args.output, read_gate(client, args.gate_run_id)["registry_name"])
 
 
 if __name__ == "__main__":

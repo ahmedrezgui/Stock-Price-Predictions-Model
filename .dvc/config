@@ -1,5 +1,5 @@
 [core]
     remote = azure-blob
 ['remote "azure-blob"']
-    url = azure://datasets
-    account_name = stockspricesdatastore
+    url = azure://forecasting
+    account_name = ststockhistoricdata

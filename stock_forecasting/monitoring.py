@@ -86,6 +86,11 @@ def save_forecast(path, prediction, config, origin_close, now=None):
         "source": config.source,
     }
     payload.pop("status", None)
+    if os.getenv("FORECAST_MONITOR_BACKEND", "sqlite") == "azure":
+        from .cloud_storage import save_forecast as save_remote
+
+        save_remote(payload)
+        return forecast_id
     with database(path) as connection:
         connection.execute(
             "INSERT OR IGNORE INTO forecasts (forecast_id, identity, payload) VALUES (?, ?, ?)",
@@ -345,6 +350,10 @@ def run_monitoring(path, data_root, output, window=30, min_observations=20, uri=
         with tracking_run(config, "prediction_monitoring", uri=uri) as run:
             run.params({**identity, "window": window, "min_observations": min_observations})
             run.tags({"model_version": identity["model_version"], "monitoring_checked_at": checked.isoformat()})
+            if os.getenv("FORECAST_MONITOR_BACKEND") == "azure":
+                run.tags(
+                    {"monitoring_backend": "azure", "monitoring_container": os.environ["FORECAST_MONITOR_CONTAINER"]}
+                )
             run.metrics(group["counts"], "counts")
             for step, point in enumerate(group["history"]):
                 run.metrics(point, "rolling", step)
@@ -362,7 +371,14 @@ def main():
     parser.add_argument("--min-observations", type=int, default=20)
     parser.add_argument("--mlflow-uri")
     args = parser.parse_args()
-    result = run_monitoring(args.database, args.data, args.report, args.window, args.min_observations, args.mlflow_uri)
+    if os.getenv("FORECAST_MONITOR_BACKEND", "sqlite") == "azure":
+        from .cloud_storage import reconcile_remote
+
+        result = reconcile_remote(args.data, args.report, args.window, args.min_observations, args.mlflow_uri)
+    else:
+        result = run_monitoring(
+            args.database, args.data, args.report, args.window, args.min_observations, args.mlflow_uri
+        )
     print(f"Forecasts: {result['forecast_count']}; data issues: {len(result['issues'])}; report: {args.report}")
     if result["issues"]:
         raise SystemExit(1)

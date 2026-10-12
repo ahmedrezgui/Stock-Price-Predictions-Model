@@ -200,7 +200,8 @@ def test_unguarded_azure_path_is_closed(monkeypatch):
 
 
 @pytest.mark.parametrize("served_version", ["expected", "wrong"])
-def test_serving_verification_checks_actual_response(monkeypatch, served_version):
+@pytest.mark.parametrize("deployment_status", ["production_approved", "preview_unapproved"])
+def test_serving_verification_checks_actual_response(monkeypatch, served_version, deployment_status):
     import httpx
 
     original_client = httpx.Client
@@ -212,7 +213,7 @@ def test_serving_verification_checks_actual_response(monkeypatch, served_version
             return httpx.Response(200, json={"status": "ready"})
         assert request.url.path == "/v1/predict"
         assert "model_version" not in json.loads(request.content)
-        return httpx.Response(200, json={"model_version": served_version})
+        return httpx.Response(200, json={"model_version": served_version, "deployment_status": deployment_status})
 
     monkeypatch.setattr(
         deployment.httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(response), **kwargs)
@@ -220,6 +221,9 @@ def test_serving_verification_checks_actual_response(monkeypatch, served_version
     metadata = {"model_version": "expected", "model": {"config": Config().to_dict()}}
     if served_version == "wrong":
         with pytest.raises(ValueError, match="Serving model differs"):
+            deployment.verify_serving("https://example.test", metadata)
+    elif deployment_status != "production_approved":
+        with pytest.raises(ValueError, match="unapproved preview"):
             deployment.verify_serving("https://example.test", metadata)
     else:
         deployment.verify_serving("https://example.test", metadata)
