@@ -80,7 +80,7 @@ def _train_candidate(csv, config, root, output, force, refit_production, trackin
     )
     implementation = b"".join(
         p.read_bytes()
-        for folder in (Path(__file__).parent, Path(__file__).parents[1] / "src/prediction_model/models")
+        for folder in (Path(__file__).parent, Path(__file__).parents[1] / "stock_forecasting/neural/models")
         for p in sorted(folder.glob("*.py"))
     )
     fingerprint = sha256(

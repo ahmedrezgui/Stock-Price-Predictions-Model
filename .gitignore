@@ -74,7 +74,8 @@ instance/
 docs/_build/
 
 # Personal documentation stays local.
-/docs/
+/docs/*
+!/docs/assistant.md
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
@@ -171,3 +172,6 @@ reports/monitoring/
 /AZURE_OPERATIONS.md
 /AZURE_STUDENT_SETUP.md
 /AZURE_RESOURCE_GUIDE.md
+
+mlflow-assistant.db
+mlflow-assistant.db-*

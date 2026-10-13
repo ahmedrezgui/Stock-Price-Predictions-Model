@@ -9,8 +9,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import MinMaxScaler
 
 # Import your handlers
-from src.handlers.model_handler  import save_model, get_or_create_model
-from src.handlers.scaler_handler import save_scaler, get_or_create_scaler
+from legacy.handlers.model_handler  import save_model, get_or_create_model
+from legacy.handlers.scaler_handler import save_scaler, get_or_create_scaler
 
 # Names for this smoke-test
 TEST_MODEL_NAME  = "test_smoke_model"

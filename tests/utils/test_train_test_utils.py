@@ -11,7 +11,7 @@ from datetime import datetime
 import sys,os
 from pathlib import Path
 sys.path.insert(0, str(Path(os.getcwd()) / '..' / '..'))
-from src import IModel
+from legacy import IModel
 from utils import split_dataset, get_features_target_from_dataset, plot_stock_graph, train, evaluate, plot_evaluation_result, train_model, predict
 from enums import ValidationMetricEnum
 
@@ -24,7 +24,7 @@ def test_split_dataset():
 
 @pytest.mark.parametrize('one_dimensional', [False, True])
 def test_train_and_evaluate_numpy_price_series(one_dimensional):
-    from src import ARIMAModel
+    from legacy import ARIMAModel
 
     prices = np.arange(100, dtype=float)
     if not one_dimensional:

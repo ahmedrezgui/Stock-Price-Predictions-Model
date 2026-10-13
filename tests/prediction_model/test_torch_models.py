@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.prediction_model import GRUModel, IModel, LSTMModel
+from stock_forecasting.neural import GRUModel, IModel, LSTMModel
 
 
 @pytest.mark.parametrize("model_class", [LSTMModel, GRUModel])

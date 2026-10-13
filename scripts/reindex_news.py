@@ -24,7 +24,7 @@ import sys
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(os.path.dirname(__file__)) / '..'))
-from src import get_pinecone_vector_store
+from stock_assistant import get_pinecone_vector_store
 from scripts.news_scraper import chunk_documents, process_urls, store_docs
 
 load_dotenv()

@@ -1,42 +1,8 @@
 name: Stock_Price_Prediction
+channels:
+  - conda-forge
 dependencies:
-  - python=3.11.0
-  - pandas
-  - numpy
-  - scikit-learn
-  - statsmodels
-  - pmdarima
-  - jupyter
-  - matplotlib
-  - pytest
-  - pydantic==1.10.8
+  - python=3.11
   - pip
   - pip:
-      - valkey
-      - "valkey[hiredis]"
-      - dvc[azure]
-      - torch
-      - orjson
-      - fastapi==0.100.0
-      - uvicorn[standard]==0.22.0
-      - streamlit
-      - requests
-      - plotly
-      - python-dotenv
-      - requests_cache
-      - langchain
-      - langgraph==1.2.9
-      - langgraph-checkpoint
-      - langchain-community
-      - langchain-google-genai
-      - langchain-tavily
-      - tavily-python
-      - pinecone-client
-      - langchain-pinecone
-      - pinecone-notebooks
-      - azure-ai-ml
-      - azure-identity
-      - joblib
-      - starlette>=0.27.0,<0.28.0
-      # langgraph-sdk needs >=0.25.2; starlette 0.27's TestClient breaks on >=0.28
-      - httpx>=0.25.2,<0.28
+      - -e .[dev,assistant,gemini,retrieval,ingestion,research,frontend,legacy,tracking]

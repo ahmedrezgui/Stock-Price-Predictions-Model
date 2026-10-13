@@ -3,6 +3,15 @@
 Compare LSTM, GRU, ARIMA and simple baselines on Tunisian stock returns, then
 train versioned candidates and serve predictions through FastAPI.
 
+## Agentic assistant
+
+The LangGraph assistant has its own API, Gemini/Azure/Ollama provider selection,
+LSTM endpoint tool, Plotly charts, stock-news search and MLflow **GenAI** tracing.
+See [assistant setup and architecture](docs/assistant.md) for startup commands,
+student-credit guidance and the new package layout. The old `src/` package has
+been replaced by `stock_assistant/`, `stock_forecasting/`, `market_data/`, `apps/`
+and `legacy/`.
+
 ## Start with the benchmark
 
 Open [Models_benchmark.ipynb](notebook/Models%20benchmark/Models_benchmark.ipynb)

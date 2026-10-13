@@ -1,42 +1,8 @@
 name: stock-backend
 channels:
   - conda-forge
-
 dependencies:
   - python=3.11
-  - pandas
-  - numpy
-  - scikit-learn
   - pip
-  - matplotlib
-  - statsmodels
-  - pmdarima
-  - jupyter
-  - pydantic==1.10.8
   - pip:
-      - valkey
-      - "valkey[hiredis]"
-      - dvc[azure]
-      - torch
-      - orjson
-      - fastapi==0.100.0
-      - uvicorn[standard]==0.22.0
-      - python-dotenv
-      - langchain
-      - langgraph==1.2.9
-      - langgraph-checkpoint
-      - langchain-community
-      - langchain-google-genai
-      - langchain-tavily
-      - tavily-python
-      - plotly
-      - pinecone-client
-      - langchain-pinecone
-      - pinecone-notebooks
-      - azure-identity
-      - joblib
-      - starlette>=0.27.0,<0.28.0
-      # langgraph-sdk needs >=0.25.2; starlette 0.27's TestClient breaks on >=0.28
-      - httpx>=0.25.2,<0.28
-      - dvc-azure
-      - azure-ai-ml
+      - -e .[assistant,gemini,retrieval,legacy]

@@ -1,16 +1,16 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-from src.web.back.main import app
+from apps.back.main import app
 from sklearn.preprocessing import MinMaxScaler
 import os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(os.path.dirname(__file__)) / '..' / '..' / '..'))
 import pandas as pd
-from src import LSTMModel
+from legacy import LSTMModel
 
 
-@patch("src.services.stock_data_service.os.listdir")
+@patch("market_data.stock_data_service.os.listdir")
 @patch("dotenv.load_dotenv")
 @patch.dict(os.environ, {"WINDOW_SIZE": "1", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL", "DISABLE_BACKEND_CACHE": "true"})
 def test_get_companies(mock_dotenv, mock_listdir):
@@ -22,12 +22,12 @@ def test_get_companies(mock_dotenv, mock_listdir):
     assert response.status_code == 200
     assert response.json() == ["AB", "AL"]
 
-@patch("src.services.stock_data_service.get_model")
-@patch("src.services.stock_data_service.get_scaler")
-@patch("src.services.stock_data_service.predict")
-@patch("src.services.stock_data_service.os.path.exists")
-@patch("src.services.stock_data_service.pd.read_csv")
-@patch("src.services.stock_data_service.subprocess.run")
+@patch("market_data.stock_data_service.get_model")
+@patch("market_data.stock_data_service.get_scaler")
+@patch("market_data.stock_data_service.predict")
+@patch("market_data.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.pd.read_csv")
+@patch("market_data.stock_data_service.subprocess.run")
 @patch("dotenv.load_dotenv")
 @patch.dict(os.environ, {"WINDOW_SIZE": "1", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL", "DISABLE_BACKEND_CACHE": "true"})
 def test_get_stock_valid(mock_dotenv, mock_subprocess, mock_read_csv, mock_exists, mock_predict, mock_get_scaler, mock_get_model):
@@ -53,7 +53,7 @@ def test_get_stock_valid(mock_dotenv, mock_subprocess, mock_read_csv, mock_exist
     assert data["columns"] == ["date", "ouverture", "haut", "bas", "cloture", "volume"]
     assert data["data"][0]["cloture"] == 100
 
-@patch("src.services.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.os.path.exists")
 @patch("dotenv.load_dotenv")
 @patch.dict(os.environ, {"WINDOW_SIZE": "1", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL", "DISABLE_BACKEND_CACHE": "true"})
 def test_get_stock_not_found(mock_dotenv, mock_exists):
@@ -65,16 +65,18 @@ def test_get_stock_not_found(mock_dotenv, mock_exists):
     assert response.status_code == 404
 
 
-@patch("src.web.back.main.ask")
-def test_rag_answers_a_json_question(mock_ask):
+@patch("apps.back.main.ask")
+def test_chat_answers_a_json_question(mock_ask):
     mock_ask.return_value = {
         "text": "BIAT closed at 100.",
         "sources": [{"title": "Market up", "date": "01/03/2024", "link": "https://x/a"}],
     }
 
     with TestClient(app) as client:
+        assert "/rag" not in client.get("/openapi.json").json()["paths"]
+        assert client.post("/rag", json={"question": "BIAT?"}).status_code == 404
         response = client.post(
-            "/rag", json={"question": "what did BIAT close at?", "thread_id": "abc"}
+            "/chat", json={"question": "what did BIAT close at?", "thread_id": "abc"}
         )
 
     assert response.status_code == 200
@@ -86,24 +88,24 @@ def test_rag_answers_a_json_question(mock_ask):
     assert mock_ask.call_args.args[1:] == ("what did BIAT close at?", "abc")
 
 
-@patch("src.web.back.main.ask")
-def test_rag_starts_a_thread_when_none_is_given(mock_ask):
+@patch("apps.back.main.ask")
+def test_chat_starts_a_thread_when_none_is_given(mock_ask):
     mock_ask.return_value = {"text": "hello", "sources": []}
 
     with TestClient(app) as client:
-        response = client.post("/rag", json={"question": "hi"})
+        response = client.post("/chat", json={"question": "hi"})
 
     assert response.status_code == 200
     assert response.json()["thread_id"]
 
 
-@patch("src.web.back.main.ask")
-def test_rag_still_accepts_a_plain_text_body(mock_ask):
+@patch("apps.back.main.ask")
+def test_chat_still_accepts_a_plain_text_body(mock_ask):
     mock_ask.return_value = {"text": "hello", "sources": []}
 
     with TestClient(app) as client:
         response = client.post(
-            "/rag",
+            "/chat",
             content="what did BIAT close at?",
             headers={"Content-Type": "text/plain"},
         )
@@ -112,10 +114,10 @@ def test_rag_still_accepts_a_plain_text_body(mock_ask):
     assert mock_ask.call_args.args[1] == "what did BIAT close at?"
 
 
-@patch("src.web.back.main.ask")
-def test_rag_rejects_an_empty_question(mock_ask):
+@patch("apps.back.main.ask")
+def test_chat_rejects_an_empty_question(mock_ask):
     with TestClient(app) as client:
-        response = client.post("/rag", json={"question": "   "})
+        response = client.post("/chat", json={"question": "   "})
 
     assert response.status_code == 400
     mock_ask.assert_not_called()

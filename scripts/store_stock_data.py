@@ -13,7 +13,7 @@ from dateutil.relativedelta import relativedelta
 import sys
 sys.path.insert(0, str(Path(os.getcwd()) / '..'))
 from utils import STOCK_DATA_URL
-from src import get_pinecone_vector_store
+from stock_assistant import get_pinecone_vector_store
 
 
 

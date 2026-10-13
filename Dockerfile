@@ -3,9 +3,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MPLCONFIGDIR=/tmp/matplotlib
 COPY pyproject.toml /app/
 COPY stock_forecasting /app/stock_forecasting
-COPY src/__init__.py /app/src/__init__.py
-COPY src/prediction_model /app/src/prediction_model
 COPY enums /app/enums
+COPY utils /app/utils
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir . azure-identity azure-storage-blob
 COPY configs /app/configs

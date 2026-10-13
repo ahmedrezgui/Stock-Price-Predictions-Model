@@ -1,7 +1,7 @@
 name: Forecast correctness (no cloud)
 on:
   push:
-    paths: ['stock_forecasting/**', 'src/prediction_model/**', 'scripts/train_model.py', 'notebook/**', 'tests/forecasting/**', 'pyproject.toml', 'configs/release_policy.json', '.github/workflows/forecast-release.yml', '.github/workflows/forecast-ci.yml']
+    paths: ['stock_forecasting/**', 'stock_forecasting/neural/**', 'scripts/train_model.py', 'notebook/**', 'tests/forecasting/**', 'pyproject.toml', 'configs/release_policy.json', '.github/workflows/forecast-release.yml', '.github/workflows/forecast-ci.yml']
   pull_request:
 jobs:
   test:
