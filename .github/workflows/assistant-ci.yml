@@ -1,0 +1,19 @@
+name: Assistant correctness (offline)
+on:
+  pull_request:
+  push:
+    paths: ['stock_assistant/**', 'market_data/**', 'tests/assistant/**', 'pyproject.toml', '.github/workflows/assistant-ci.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ASSISTANT_TRACING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install '.[dev,assistant,gemini]'
+      - run: ruff check stock_assistant market_data/history.py tests/assistant/test_service.py
+      - run: pytest tests/assistant -q

@@ -24,9 +24,9 @@ jobs:
           # Tag with the current Git SHA for uniqueness
           IMAGE_BACKEND=ramirachdi/stock-backend:${{ github.sha }}
 
-          # Build from src/web/back/Dockerfile
+          # Build from apps/back/Dockerfile
           docker build \
-            -f src/web/back/Dockerfile \
+            -f apps/back/Dockerfile \
             -t $IMAGE_BACKEND \
             .
 
@@ -42,7 +42,7 @@ jobs:
           IMAGE_FRONTEND=ramirachdi/stock-frontend:${{ github.sha }}
 
           docker build \
-            -f src/web/front/Dockerfile \
+            -f apps/front/Dockerfile \
             -t $IMAGE_FRONTEND \
             .
 

@@ -6,13 +6,13 @@ import pandas as pd
 import pytest
 from sklearn.preprocessing import MinMaxScaler
 
-from src.services import stock_data_service
-from src.services import (
+from market_data import stock_data_service
+from market_data import (
     CompanyNotFoundError,
     DataUnavailableError,
     ModelUnavailableError,
 )
-from src import LSTMModel
+from legacy import LSTMModel
 
 
 ENV = {"WINDOW_SIZE": "1", "MODEL_NAME": "LSTM", "MODEL_LOCATION": "LOCAL"}
@@ -35,14 +35,14 @@ def _trained_model(df):
     return model
 
 
-@patch("src.services.stock_data_service.os.listdir")
+@patch("market_data.stock_data_service.os.listdir")
 def test_list_companies_strips_dvc_suffix(mock_listdir):
     mock_listdir.return_value = ["AB.csv.dvc", "AL.csv.dvc", "notes.txt"]
 
     assert stock_data_service.list_companies() == ["AB", "AL"]
 
 
-@patch("src.services.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.os.path.exists")
 def test_load_company_df_unknown_company(mock_exists):
     mock_exists.return_value = False
 
@@ -50,9 +50,9 @@ def test_load_company_df_unknown_company(mock_exists):
         stock_data_service.load_company_df("UNKNOWN")
 
 
-@patch("src.services.stock_data_service.pd.read_csv")
-@patch("src.services.stock_data_service.subprocess.run")
-@patch("src.services.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.pd.read_csv")
+@patch("market_data.stock_data_service.subprocess.run")
+@patch("market_data.stock_data_service.os.path.exists")
 def test_load_company_df_pulls_missing_csv(mock_exists, mock_run, mock_read_csv):
     # .dvc file present, csv absent
     mock_exists.side_effect = [True, False]
@@ -64,8 +64,8 @@ def test_load_company_df_pulls_missing_csv(mock_exists, mock_run, mock_read_csv)
     assert df["date"].dtype.kind == "M"
 
 
-@patch("src.services.stock_data_service.subprocess.run")
-@patch("src.services.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.subprocess.run")
+@patch("market_data.stock_data_service.os.path.exists")
 def test_load_company_df_reports_failed_pull(mock_exists, mock_run):
     mock_exists.side_effect = [True, False]
     mock_run.side_effect = subprocess.CalledProcessError(
@@ -77,10 +77,10 @@ def test_load_company_df_reports_failed_pull(mock_exists, mock_run):
 
 
 @patch.dict(os.environ, ENV)
-@patch("src.services.stock_data_service.get_scaler")
-@patch("src.services.stock_data_service.get_model")
-@patch("src.services.stock_data_service.pd.read_csv")
-@patch("src.services.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.get_scaler")
+@patch("market_data.stock_data_service.get_model")
+@patch("market_data.stock_data_service.pd.read_csv")
+@patch("market_data.stock_data_service.os.path.exists")
 def test_get_prediction_requires_a_model(mock_exists, mock_read_csv, mock_get_model, mock_get_scaler):
     mock_exists.return_value = True
     mock_read_csv.return_value = _make_df()
@@ -92,10 +92,10 @@ def test_get_prediction_requires_a_model(mock_exists, mock_read_csv, mock_get_mo
 
 
 @patch.dict(os.environ, ENV)
-@patch("src.services.stock_data_service.get_scaler")
-@patch("src.services.stock_data_service.get_model")
-@patch("src.services.stock_data_service.pd.read_csv")
-@patch("src.services.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.get_scaler")
+@patch("market_data.stock_data_service.get_model")
+@patch("market_data.stock_data_service.pd.read_csv")
+@patch("market_data.stock_data_service.os.path.exists")
 def test_get_prediction_rejects_a_stale_model(mock_exists, mock_read_csv, mock_get_model, mock_get_scaler):
     df = _make_df()
     mock_exists.return_value = True
@@ -110,11 +110,11 @@ def test_get_prediction_rejects_a_stale_model(mock_exists, mock_read_csv, mock_g
 
 
 @patch.dict(os.environ, ENV)
-@patch("src.services.stock_data_service.predict")
-@patch("src.services.stock_data_service.get_scaler")
-@patch("src.services.stock_data_service.get_model")
-@patch("src.services.stock_data_service.pd.read_csv")
-@patch("src.services.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.predict")
+@patch("market_data.stock_data_service.get_scaler")
+@patch("market_data.stock_data_service.get_model")
+@patch("market_data.stock_data_service.pd.read_csv")
+@patch("market_data.stock_data_service.os.path.exists")
 def test_get_prediction_returns_dated_forecast(
     mock_exists, mock_read_csv, mock_get_model, mock_get_scaler, mock_predict
 ):
@@ -134,11 +134,11 @@ def test_get_prediction_returns_dated_forecast(
 
 
 @patch.dict(os.environ, ENV)
-@patch("src.services.stock_data_service.predict")
-@patch("src.services.stock_data_service.get_scaler")
-@patch("src.services.stock_data_service.get_model")
-@patch("src.services.stock_data_service.pd.read_csv")
-@patch("src.services.stock_data_service.os.path.exists")
+@patch("market_data.stock_data_service.predict")
+@patch("market_data.stock_data_service.get_scaler")
+@patch("market_data.stock_data_service.get_model")
+@patch("market_data.stock_data_service.pd.read_csv")
+@patch("market_data.stock_data_service.os.path.exists")
 def test_get_stock_with_forecast_appends_predicted_rows(
     mock_exists, mock_read_csv, mock_get_model, mock_get_scaler, mock_predict
 ):

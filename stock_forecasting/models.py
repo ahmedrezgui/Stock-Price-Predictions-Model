@@ -260,7 +260,7 @@ def naive_predictions(train_targets: np.ndarray, n: int) -> dict:
 
 def create_forecaster(input_size, config):
     """All configured training paths use the existing public model classes."""
-    from src.prediction_model import LSTMModel, GRUModel
+    from stock_forecasting.neural import LSTMModel, GRUModel
 
     cls = LSTMModel if config.family == "lstm" else GRUModel
     return cls.from_config(input_size, config)

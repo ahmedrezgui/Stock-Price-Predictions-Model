@@ -5,7 +5,7 @@ from stock_forecasting.models import create_forecaster
 from stock_forecasting.training import train_candidate
 from stock_forecasting.registry import read_registry, promote, rollback, identity
 from stock_forecasting.artifacts import load_bundle
-from src.prediction_model import LSTMModel, GRUModel
+from stock_forecasting.neural import LSTMModel, GRUModel
 
 
 @pytest.mark.parametrize("family,cls", [("lstm", LSTMModel), ("gru", GRUModel)])

@@ -10,7 +10,7 @@ from datetime import datetime
 import sys,os
 from pathlib import Path
 sys.path.insert(0, str(Path(os.getcwd()) / '..'))
-from src import IModel, ARIMAModel
+from legacy import IModel, ARIMAModel
 
 
 def split_dataset(dataset: pd.DataFrame, test_size: float = 0.2) -> tuple [pd.DataFrame, pd.DataFrame] :
