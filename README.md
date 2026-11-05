@@ -5,6 +5,10 @@ train versioned candidates and serve predictions through FastAPI.
 
 ## Agentic assistant
 
+The frontend now uses **React, Vite and Tailwind CSS**. See the
+[frontend guide](apps/front/README.md) for local startup and deployment. Streamlit
+has been replaced; the assistant and dashboard continue to run as FastAPI services.
+
 The LangGraph assistant has its own API, Gemini/Azure/Ollama provider selection,
 LSTM endpoint tool, Plotly charts, stock-news search and MLflow **GenAI** tracing.
 See [assistant setup and architecture](docs/assistant.md) for startup commands,

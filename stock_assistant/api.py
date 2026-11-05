@@ -31,7 +31,7 @@ def create_app(graph=None):
         app.state.graph = graph if graph is not None else create_agents_graph()
         yield
 
-    app = FastAPI(title="StockWise assistant", lifespan=lifespan)
+    app = FastAPI(title="TuniScope — StockWise assistant", lifespan=lifespan)
     # Striped locks serialize turns for a conversation without unbounded lock growth.
     locks = [Lock() for _ in range(64)]
 

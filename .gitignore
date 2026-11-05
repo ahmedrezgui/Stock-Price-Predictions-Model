@@ -175,3 +175,7 @@ reports/monitoring/
 
 mlflow-assistant.db
 mlflow-assistant.db-*
+node_modules/
+*.tsbuildinfo
+playwright-report/
+test-results/

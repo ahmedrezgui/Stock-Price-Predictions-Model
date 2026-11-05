@@ -110,3 +110,57 @@ def test_undeployed_stock_cannot_request_forecast():
     with patch("apps.back.dashboard.get_models", return_value=[]), patch("apps.back.dashboard.get_prediction") as predict:
         assert TestClient(app).get("/stock/AB").status_code == 404
         predict.assert_not_called()
+
+
+def test_chart_endpoint_aggregates_months_without_requesting_prediction():
+    history = pd.DataFrame({"date": pd.to_datetime(["2026-01-02", "2026-01-05", "2026-02-02"]),
+                            "cloture": [10., 12., 14.], "volume": [100, 200, 300]})
+    with (patch("apps.back.dashboard.load_closing_history", return_value=history),
+          patch("apps.back.dashboard.available_models", return_value={"AL": {}}),
+          patch("apps.back.dashboard.get_prediction") as predict):
+        response = TestClient(app).get("/stock/AL/chart?interval=Month&style=Line&sma=&momentum=None")
+    assert response.status_code == 200
+    assert response.json()["data"][0]["x"] == ["2026-01", "2026-02"]
+    predict.assert_not_called()
+
+
+def test_chart_rejects_invalid_controls_and_undeployed_stocks():
+    client = TestClient(app)
+    assert client.get("/stock/AL/chart?interval=Week").status_code == 422
+    assert client.get("/stock/AL/chart?sma=-1").status_code == 422
+    with patch("apps.back.dashboard.available_models", return_value={}):
+        assert client.get("/stock/UNKNOWN/chart").status_code == 404
+
+
+def test_market_list_uses_history_without_running_forecasts():
+    history = pd.DataFrame({"date": pd.to_datetime(["2026-10-01", "2026-10-02"]),
+                            "cloture": [100., 102.], "volume": [20., 30.]})
+    with (patch("apps.back.dashboard.available_models", return_value={"BIAT": {}}),
+          patch("apps.back.dashboard.load_closing_history", return_value=history),
+          patch("apps.back.dashboard.get_prediction") as predict):
+        rows = TestClient(app).get("/market").json()
+    assert rows[0]["symbol"] == "BIAT"
+    assert rows[0]["change_pct"] == pytest.approx(2)
+    assert rows[0]["volume"] == 30
+    predict.assert_not_called()
+
+
+def test_news_filters_links_caches_search_and_hides_provider_errors():
+    from apps.back.dashboard import _news_cache
+    _news_cache.clear()
+    with (patch("apps.back.dashboard.available_models", return_value={"BIAT": {}}),
+          patch("stock_assistant.tools.web_search_tools.run_search", return_value={"documents": [
+              {"title": "Update", "link": "https://example.com/news", "date": "2026-10-01"},
+              {"title": "Unsafe", "link": "javascript:alert(1)"},
+          ]}) as search):
+        first = TestClient(app).get("/stock/BIAT/news").json()
+        assert TestClient(app).get("/stock/BIAT/news").json() == first
+        assert len(first["articles"]) == 1
+        search.assert_called_once()
+    _news_cache.clear()
+    with (patch("apps.back.dashboard.available_models", return_value={"BIAT": {}}),
+          patch("stock_assistant.tools.web_search_tools.run_search", return_value={"error": "secret-token", "documents": []})):
+        response = TestClient(app).get("/stock/BIAT/news")
+        assert response.json()["unavailable"] is True
+        assert "secret-token" not in response.text
+    _news_cache.clear()

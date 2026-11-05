@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from apps.front.trading_charts import build_chart, indicators
+from apps.back.trading_charts import build_chart, indicators
 
 
 def history(size=260):
@@ -51,7 +51,7 @@ def test_short_history_no_invented_indicators():
 
 
 def test_monthly_ohlcv_aggregation_and_year_axis():
-    from apps.front.trading_charts import aggregate_bars
+    from apps.back.trading_charts import aggregate_bars
     frame = pd.DataFrame({
         "date": pd.to_datetime(["2023-12-29", "2024-01-02", "2024-01-31", "2024-02-01"]),
         "ouverture": [9., 10., 12., 14.], "haut": [11., 13., 15., 16.],
@@ -76,8 +76,9 @@ def test_monthly_ohlcv_aggregation_and_year_axis():
 def test_monthly_indicators_use_months_and_keep_warmup():
     frame = history(900)
     chart = build_chart(frame, "BIAT", interval="Month", period="3M", sma_windows=(20,))
-    from apps.front.trading_charts import aggregate_bars
+    from apps.back.trading_charts import aggregate_bars
     expected = indicators(aggregate_bars(frame, "Month"), (20,))
     trace = next(t for t in chart.data if t.name == "SMA 20")
     assert trace.y[-1] == pytest.approx(expected["SMA 20"].iloc[-1])
     assert len(trace.x) <= 4
+
