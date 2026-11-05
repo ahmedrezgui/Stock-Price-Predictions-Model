@@ -64,6 +64,16 @@ def get_prediction(company, horizon=1, model_version=None):
                 raise ValueError("Forecast response does not match request")
             return result.model_dump()
     except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 422:
+            try:
+                error = exc.response.json().get("error", {})
+            except (ValueError, AttributeError):
+                error = {}
+            if isinstance(error, dict) and error.get("message") == "Latest completed observation is stale":
+                raise ForecastServiceError(
+                    "The deployed forecast is paused because its latest market observation is stale. "
+                    "Download and publish updated market data, then refresh the forecast."
+                ) from None
         raise ForecastServiceError(
             f"Forecast service returned HTTP {exc.response.status_code}. "
             "Check /models for available approved versions; historical data remains available."

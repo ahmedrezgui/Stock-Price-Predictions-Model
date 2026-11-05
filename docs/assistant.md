@@ -2,7 +2,7 @@
 
 The LangGraph assistant runs independently of the forecasting API. It reads local
 market history, calls the LSTM prediction endpoint, searches news, and returns
-Plotly figures to Streamlit. MLflow records the graph and model/tool calls in a
+Plotly figures to the React/Vite frontend. MLflow records the graph and model/tool calls in a
 dedicated **GenAI** experiment named `stock-assistant`.
 
 ## Start locally
@@ -38,14 +38,15 @@ Start each service in a separate terminal:
 # Assistant service (one worker while conversation memory is in process).
 python -m uvicorn stock_assistant.api:app --host 127.0.0.1 --port 8001 --env-file .env
 
-# Standalone chat page, or use the relocated apps/front/home.py for the full UI.
-python -m streamlit run apps/front/pages/chatbot.py
+# Dashboard data and chart service.
+python -m uvicorn apps.back.dashboard:app --host 127.0.0.1 --port 8002 --env-file .env
 
 # Dedicated assistant database; training keeps its existing store.
 python -m mlflow ui --backend-store-uri sqlite:///mlflow-assistant.db --host 127.0.0.1 --port 5000
 ```
 
-Open the Streamlit URL shown in the terminal and MLflow at http://127.0.0.1:5000.
+In another terminal, run `cd apps/front`, `npm ci`, and `npm run dev` (Node 22.12+).
+Open http://127.0.0.1:5173 and MLflow at http://127.0.0.1:5000.
 Select `stock-assistant`, whose workflow type is GenAI, then inspect **Traces**.
 Training stays in `stock-return-forecasting`. The setup uses the MLflow
 `mlflow.experimentKind=genai_development` tag and LangChain/LangGraph autologging.
@@ -140,7 +141,7 @@ on demand. Provider switching requires restarting the service.
 | `stock_assistant/` | LangGraph workflow, model providers, HTTP forecast client, tools, MLflow tracing, assistant API |
 | `stock_forecasting/` | Training, evaluation, release controls, model registry, prediction API; public neural classes in `neural/` |
 | `market_data/` | Validated local history adapter; older dashboard data adapter retained separately |
-| `apps/front/` | Streamlit UI |
+| `apps/front/` | React/Vite/Tailwind UI |
 | `apps/back/` | Existing dashboard API and cache; `/chat` and mounted `/forecast` |
 | `legacy/` | Earlier pickle model/scaler handlers, factories and endpoint |
 | `scripts/`, `configs/`, `infrastructure/` | Operational entry points, configuration, deployment assets |
@@ -196,10 +197,11 @@ gateway is exposed. A browser password prompt protects the app and MLflow over
 HTTPS. Microsoft sign-in is disabled because tenant administrator consent was
 required. Share neither the password nor the private deployment parameters.
 
-- Frontend: Streamlit, through the authenticated gateway.
+- Frontend: static React/Vite build served by nginx, through the authenticated gateway.
 - Dashboard: `apps.back.dashboard:app`, validated date/closing-price history plus remote forecasts.
   Display history does not require valid opening/high/low fields; model-input OHLC
-  validation remains strict. Missing deployed models do not prevent history charts.
+  validation remains strict. Only stocks with deployed models are selectable;
+  a temporary prediction failure does not prevent history charts.
 - Assistant: `stock_assistant.api:app`, Azure LLM plus the existing Azure forecast API.
 - MLflow: `/mlflow/` behind the same password protection; the assistant uses the
   private loopback tracking endpoint. This is separate from forecasting MLflow in Azure ML.
@@ -207,12 +209,13 @@ required. Share neither the password nor the private deployment parameters.
   MLflow traces/artifacts. The small demo uses MLflow's explicitly enabled file
   store with a single worker, not SQLite over SMB. Move to a supported SQL tracking
   backend before scaling beyond this demo. Existing local traces are not migrated.
-- Chat history is in memory and resets on restart/scale-to-zero. Streamlit sessions
-  likewise do not survive restarts. Market data is a deployment snapshot and must
+- Server conversation memory resets on restart/scale-to-zero. The browser keeps
+  visible chats until the tab reloads or closes. Market data is a snapshot and must
   be refreshed from the maintained datasets; no automatic refresh job is added.
 
 The app scales from zero to one replica (2 vCPU / 4 GiB total across containers).
-Close browser tabs when finished: active WebSocket sessions can keep it running.
+The static frontend does not maintain an idle WebSocket; active assistant requests
+can keep the app running while research completes.
 The subscription has a monthly budget target of 20 billing-currency units, not a
 spending cap or automatic shutdown; no email notifications were configured.
 Azure retail pricing checked for UK South lists GPT-4.1 mini Global Standard at
@@ -258,10 +261,10 @@ are excluded from candles; invalid volume values remain missing. Display logic
 never relaxes model training or inference validation. Price units and observation
 dates come from the source snapshot, not a live exchange feed.
 
-Frontend chart calculations live in `apps/front/trading_charts.py`; the theme is
-in `.streamlit/config.toml`. The chart includes separate aligned volume/momentum
+Chart calculations live in `apps/back/trading_charts.py`; the frontend theme is
+in `apps/front/src/styles.css`. The chart includes separate aligned volume/momentum
 panels, configurable overlays, zoom/pan, and CSV export. Use Refresh to invalidate
-the local response cache when deployments or market data change.
+the displayed data when deployments or market data change.
 
 Daily data publication, forecast refresh and the proposed multi-horizon model are
 documented in [dynamic_forecasts.md](dynamic_forecasts.md).
@@ -283,8 +286,8 @@ tool arguments/results, provider errors, or model reasoning. Answers appear afte
 final grading; intermediate drafts are deliberately not token-streamed.
 
 Restart the assistant and frontend together to enable this feature locally.
-The frontend reads the assistant stream server-to-server, so the public gateway
-continues to carry Streamlit's WebSocket updates. Streaming responses disable
+The browser reads the assistant stream through the authenticated gateway's
+`/assistant-api/` prefix (Vite proxies it locally). Streaming responses disable
 proxy buffering and send idle heartbeats. Disconnecting stops delivery and skips
 queued turns that have not started; an already-running model/tool operation may
 finish and update conversation state. It is not a provider cancellation request.

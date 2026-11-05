@@ -81,12 +81,8 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: 'frontend'
           image: frontendImage
-          env: [
-            { name: 'ASSISTANT_URL', value: 'http://localhost:8001' }
-            { name: 'BACKEND_URL', value: 'http://localhost:8002' }
-          ]
           resources: { cpu: json('0.25'), memory: '0.5Gi' }
-          probes: [{ type: 'Readiness', httpGet: { path: '/_stcore/health', port: 8501 }, initialDelaySeconds: 15 }]
+          probes: [{ type: 'Readiness', httpGet: { path: '/health', port: 8501 }, initialDelaySeconds: 5 }]
         }
         {
           name: 'assistant'

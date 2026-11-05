@@ -75,7 +75,8 @@ def build_chart(frame, symbol, style="Candles", sma_windows=(20, 50), ema_window
     data["date"] = data.date.dt.strftime({"Day": "%Y-%m-%d", "Month": "%Y-%m", "Year": "%Y"}[interval])
     panels = ["Price"] + (["Volume"] if volume else []) + ([momentum] if momentum != "None" else [])
     fig = make_subplots(rows=len(panels), cols=1, shared_xaxes=True, vertical_spacing=0.035, row_heights=[0.65] + [0.175] * (len(panels) - 1))
-    candles = {"ouverture", "haut", "bas"}.issubset(data.columns)
+    candles = ({"ouverture", "haut", "bas"}.issubset(data.columns)
+               and data[["ouverture", "haut", "bas"]].notna().all(axis=1).any())
     if style == "Candles" and candles:
         fig.add_trace(go.Candlestick(x=data.date, open=data.ouverture, high=data.haut, low=data.bas, close=data.cloture, name=symbol, increasing=dict(line=dict(color=UP, width=1.5), fillcolor=UP), decreasing=dict(line=dict(color=DOWN, width=1.5), fillcolor=DOWN), whiskerwidth=0.4), row=1, col=1)
     else:

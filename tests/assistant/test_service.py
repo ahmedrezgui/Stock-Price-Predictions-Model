@@ -47,7 +47,9 @@ def test_endpoint_authentication_and_evidence(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "status,payload", [(401, {"secret": "sensitive"}), (503, {}), (200, {}), (200, {**FORECAST, "symbol": "OTHER"})]
+    "status,payload", [(401, {"secret": "sensitive"}), (503, {}), (200, {}),
+                       (200, {**FORECAST, "symbol": "OTHER"}),
+                       (422, {"error": {"message": "Latest completed observation is stale"}})]
 )
 def test_endpoint_fails_closed_without_leaking_response(status, payload, monkeypatch):
     monkeypatch.setenv("ASSISTANT_FORECAST_URL", "https://forecast.example")
@@ -56,6 +58,8 @@ def test_endpoint_fails_closed_without_leaking_response(status, payload, monkeyp
         with pytest.raises(ForecastServiceError) as error:
             get_prediction("BIAT")
     assert "sensitive" not in str(error.value)
+    if status == 422:
+        assert "publish updated market data" in str(error.value)
 
 
 def test_invalid_horizon_never_calls_http():

@@ -17,3 +17,6 @@ mlruns
 .env.*
 tests
 docs
+**/node_modules
+**/dist
+**/*.tsbuildinfo
