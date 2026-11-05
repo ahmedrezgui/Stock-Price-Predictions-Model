@@ -72,11 +72,11 @@ def line_figure(series: list[dict], y_title: str, hover_format: str = ",.3f") ->
                 x=line["x"],
                 y=line["y"],
                 name=line["name"],
-                mode="lines",
+                mode="lines+markers" if len(line["x"]) <= 2 else "lines",
                 line={
                     "color": line.get("color") or series_color(index),
                     "width": LINE_WIDTH,
-                    "dash": "dash" if line.get("dashed") else "solid",
+                    "dash": line.get("dash_style", "dash" if line.get("dashed") else "solid"),
                 },
                 hovertemplate=f"%{{y:{hover_format}}}<extra>{line['name']}</extra>",
             )

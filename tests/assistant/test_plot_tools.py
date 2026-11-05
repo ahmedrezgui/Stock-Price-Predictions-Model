@@ -92,7 +92,7 @@ def test_line_figure_is_plain_json():
 # -------------------------------------------------------------------- one stock
 
 
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_stock_puts_a_chart_in_state_and_a_sentence_in_the_conversation(mock_load):
     mock_load.return_value = price_history([100, 110, 120])
 
@@ -105,7 +105,7 @@ def test_plot_stock_puts_a_chart_in_state_and_a_sentence_in_the_conversation(moc
     assert "figure" not in tool_message(command)
 
 
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_stock_draws_requested_indicators(mock_load):
     mock_load.return_value = price_history(list(range(100, 160)))
 
@@ -115,7 +115,7 @@ def test_plot_stock_draws_requested_indicators(mock_load):
     assert names == ["AB close", "20-day average", "20-day EMA"]
 
 
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_stock_rejects_an_unknown_indicator(mock_load):
     mock_load.return_value = price_history([100, 110])
 
@@ -126,7 +126,7 @@ def test_plot_stock_rejects_an_unknown_indicator(mock_load):
 
 
 @patch("stock_assistant.tools.plot_tools.get_prediction")
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_stock_keeps_return_forecast_separate_from_history(mock_load, mock_forecast):
     mock_load.return_value = price_history([100, 110, 120])
     mock_forecast.return_value = {
@@ -145,7 +145,7 @@ def test_plot_stock_keeps_return_forecast_separate_from_history(mock_load, mock_
 
 
 @patch("stock_assistant.tools.plot_tools.get_prediction")
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_stock_still_draws_when_the_forecast_is_unavailable(
     mock_load, mock_forecast
 ):
@@ -160,7 +160,7 @@ def test_plot_stock_still_draws_when_the_forecast_is_unavailable(
 
 
 @patch("stock_assistant.tools.frames.list_companies")
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_stock_reports_an_unknown_company(mock_load, mock_list):
     mock_load.side_effect = CompanyNotFoundError("nope")
     mock_list.return_value = ["AB"]
@@ -174,7 +174,7 @@ def test_plot_stock_reports_an_unknown_company(mock_load, mock_list):
 # ------------------------------------------------------------------ comparison
 
 
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_comparison_rebases_every_line_to_100(mock_load):
     mock_load.side_effect = lambda company: {
         "AB": price_history([100, 150]),
@@ -192,7 +192,7 @@ def test_plot_comparison_rebases_every_line_to_100(mock_load):
     assert traces["CD"] == [100.0, 50.0]
 
 
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_comparison_needs_two_companies(mock_load):
     command = call(plot_comparison, {"companies": ["AB"]})
 
@@ -200,7 +200,7 @@ def test_plot_comparison_needs_two_companies(mock_load):
     assert charts(command) == []
 
 
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_comparison_refuses_more_series_than_the_palette_holds(mock_load):
     command = call(
         plot_comparison, {"companies": [f"C{i}" for i in range(MAX_SERIES + 1)]}
@@ -209,7 +209,7 @@ def test_plot_comparison_refuses_more_series_than_the_palette_holds(mock_load):
     assert "at most" in tool_message(command)
 
 
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_comparison_notes_a_company_it_could_not_draw(mock_load):
     def load(company):
         if company == "NOPE":
@@ -224,7 +224,7 @@ def test_plot_comparison_notes_a_company_it_could_not_draw(mock_load):
     assert "NOPE could not be included" in tool_message(command)
 
 
-@patch("stock_assistant.tools.frames.load_company_df")
+@patch("stock_assistant.tools.frames.load_closing_history")
 def test_plot_comparison_gives_up_when_too_few_survive(mock_load):
     def load(company):
         if company == "AB":
@@ -237,3 +237,31 @@ def test_plot_comparison_gives_up_when_too_few_survive(mock_load):
 
     assert charts(command) == []
     assert "Fewer than two" in tool_message(command)
+
+
+@patch("stock_assistant.tools.frames.load_closing_history")
+def test_comparison_uses_shared_origin_and_distinct_line_patterns(mock_load):
+    mock_load.side_effect = lambda company: price_history([10, 20, 30], start="2024-01-01" if company == "AB" else "2024-01-02")
+    command = call(plot_comparison, {"companies": ["AB", "CD"]})
+    a, b = charts(command)[0]["figure"]["data"]
+    assert a["x"] == b["x"] == ["2024-01-02", "2024-01-03"]
+    assert a["y"][0] == b["y"][0] == 100
+    assert a["line"]["dash"] != b["line"]["dash"]
+    assert a["mode"] == "lines+markers"
+
+
+@patch("stock_assistant.tools.frames.load_closing_history")
+def test_comparison_does_not_emit_invisible_single_point_lines(mock_load):
+    mock_load.return_value = price_history([100])
+    command = call(plot_comparison, {"companies": ["AB", "CD"]})
+    assert not charts(command)
+    assert "shared observation dates" in tool_message(command)
+
+
+@patch("stock_assistant.tools.frames.load_closing_history")
+def test_plot_indicator_warmup_survives_date_filter(mock_load):
+    mock_load.return_value = price_history(list(range(1, 61)))
+    command = call(plot_stock, {"company": "AB", "start_date": "2024-02-01", "indicators": ["sma_20"]})
+    average = charts(command)[0]["figure"]["data"][1]
+    assert average["x"][0] == "2024-02-01"
+    assert average["y"][0] == 22.5

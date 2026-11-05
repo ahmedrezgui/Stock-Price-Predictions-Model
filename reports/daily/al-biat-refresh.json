@@ -1,0 +1,72 @@
+{
+  "created_at": "2026-10-14T12:20:10.635452+00:00",
+  "mode": "apply",
+  "stocks": [
+    {
+      "symbol": "AL",
+      "model_version": "AL-lstm-return-h1-2dd84898980a",
+      "as_of": "2026-10-12",
+      "rows": 2754,
+      "sha256": "0d514c190619d56f7c7902ba6eb3d236ddb4af8562c67caf63b85f52cee7a644",
+      "status": "success",
+      "serving_published": true,
+      "dashboard_updated": true,
+      "forecast": {
+        "symbol": "AL",
+        "model": "lstm",
+        "model_version": "AL-lstm-return-h1-2dd84898980a",
+        "as_of": "2026-10-12",
+        "forecast_for": null,
+        "forecast_horizon_observations": 1,
+        "horizon_basis": "observed_bars_unverified_sessions",
+        "predicted_log_return": 0.0012467564083635807,
+        "implied_price": 228.2944502118874,
+        "deployment_status": "manual_initial_release_approved",
+        "approval_id": "fc5e7e9588beb86fb7283fb29347f9d6e8e1cc0f163ec0fa8472230bb64bc1ae",
+        "forecast_id": "802c6044d88c7579bb04031b1f68829f453317d759b537db84d4d4093ddeb9d0",
+        "forecast_horizon_sessions": null,
+        "price_basis": "unverified",
+        "direction": "up",
+        "probability_up": null,
+        "probability_calibration": null,
+        "prediction_interval": null,
+        "data_version": "db2cc39a600956c595ed",
+        "training_data_version": "129dad463fd1d92f79c0",
+        "status": "success"
+      }
+    },
+    {
+      "symbol": "BIAT",
+      "model_version": "BIAT-lstm-return-h1-e15ed0b68d52",
+      "as_of": "2026-10-12",
+      "rows": 4130,
+      "sha256": "2bf6010ada5fac81a56013f36a867a73118a628768cd539958bfc46280b59888",
+      "status": "success",
+      "serving_published": true,
+      "dashboard_updated": true,
+      "forecast": {
+        "symbol": "BIAT",
+        "model": "lstm",
+        "model_version": "BIAT-lstm-return-h1-e15ed0b68d52",
+        "as_of": "2026-10-12",
+        "forecast_for": null,
+        "forecast_horizon_observations": 1,
+        "horizon_basis": "observed_bars_unverified_sessions",
+        "predicted_log_return": -0.000584790192078799,
+        "implied_price": 161.50552553152372,
+        "deployment_status": "manual_initial_release_approved",
+        "approval_id": "fc5e7e9588beb86fb7283fb29347f9d6e8e1cc0f163ec0fa8472230bb64bc1ae",
+        "forecast_id": "f98c774e18c9f9f6554d7590981a1f1a60e37b8710cf49eac0bc9f8ae9bec745",
+        "forecast_horizon_sessions": null,
+        "price_basis": "unverified",
+        "direction": "nonpositive",
+        "probability_up": null,
+        "probability_calibration": null,
+        "prediction_interval": null,
+        "data_version": "a4ec17fb245952c3485d",
+        "training_data_version": "611f476228eea2c76bfa",
+        "status": "success"
+      }
+    }
+  ]
+}

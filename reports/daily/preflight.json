@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-10-14T12:13:45.270334+00:00",
+  "mode": "preflight",
+  "stocks": [
+    {
+      "symbol": "AL",
+      "model_version": "AL-lstm-return-h1-2dd84898980a",
+      "as_of": "2026-10-12",
+      "rows": 2754,
+      "sha256": "0d514c190619d56f7c7902ba6eb3d236ddb4af8562c67caf63b85f52cee7a644"
+    },
+    {
+      "symbol": "BIAT",
+      "model_version": "BIAT-lstm-return-h1-e15ed0b68d52",
+      "as_of": "2026-10-12",
+      "rows": 4130,
+      "sha256": "2bf6010ada5fac81a56013f36a867a73118a628768cd539958bfc46280b59888"
+    }
+  ]
+}

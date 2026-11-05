@@ -9,6 +9,7 @@ confirmation of what was drawn.
 """
 
 from typing import Annotated, List, Optional
+import pandas as pd
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
@@ -16,7 +17,7 @@ from langgraph.types import Command
 
 from ..forecast_client import get_prediction
 
-from .charts import MAX_SERIES, chart_payload, line_figure
+from .charts import MAX_SERIES, MUTED_INK, GRID_LINE, series_color, chart_payload, line_figure
 from .frames import handle_frame_error, load_window, tool_error
 from .indicators import (
     exponential_moving_average,
@@ -81,7 +82,10 @@ def plot_stock(
         Confirmation that the chart was drawn, or the reason it was not.
     """
     try:
-        df = load_window(company, start_date, end_date)
+        # Validate the requested range, but retain preceding bars for indicator warmup.
+        visible = load_window(company, start_date, end_date, display_only=True)
+        full = load_window(company, None, end_date, display_only=True) if start_date and indicators else visible
+        df = visible
     except Exception as e:
         return _failed(
             tool_call_id,
@@ -104,10 +108,11 @@ def plot_stock(
 
     for name in indicators or []:
         values = (
-            simple_moving_average(closes, int(name.split("_")[1]))
+            simple_moving_average(full["cloture"], int(name.split("_")[1]))
             if name.startswith("sma")
-            else exponential_moving_average(closes, int(name.split("_")[1]))
+            else exponential_moving_average(full["cloture"], int(name.split("_")[1]))
         )
+        values = pd.Series(values, index=full.index).reindex(df.index)
         series.append(
             {
                 "name": INDICATOR_LABELS[name],
@@ -168,7 +173,8 @@ def plot_comparison(
     Returns:
         Confirmation that the chart was drawn, or the reason it was not.
     """
-    if not companies or len(companies) < 2:
+    companies = list(dict.fromkeys(c.strip().upper() for c in companies or []))
+    if len(companies) < 2:
         return _failed(tool_call_id, tool_error("Name at least two companies to compare."))
     if len(companies) > MAX_SERIES:
         return _failed(
@@ -177,11 +183,12 @@ def plot_comparison(
         )
 
     series = []
+    histories = {}
     failures = {}
 
     for company in companies:
         try:
-            df = load_window(company, start_date, end_date)
+            df = load_window(company, start_date, end_date, display_only=True)
         except Exception as e:
             failures[company] = handle_frame_error(company, e) or str(e)
             continue
@@ -192,15 +199,9 @@ def plot_comparison(
             failures[company] = "First close is zero, so it cannot be rebased."
             continue
 
-        series.append(
-            {
-                "name": company,
-                "x": [d.strftime("%Y-%m-%d") for d in df["date"]],
-                "y": [round(float(c) / base * 100, 2) for c in closes],
-            }
-        )
+        histories[company] = df.set_index("date")["cloture"]
 
-    if len(series) < 2:
+    if len(histories) < 2:
         return _failed(
             tool_call_id,
             tool_error(
@@ -209,18 +210,27 @@ def plot_comparison(
             ),
         )
 
+    aligned = pd.DataFrame(histories).dropna().sort_index()
+    if len(aligned) < 2:
+        return _failed(tool_call_id, tool_error("Fewer than two shared observation dates; widen the date range. No comparison chart was drawn."))
+    styles = ["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
+    for index, company in enumerate(aligned):
+        values = aligned[company] / float(aligned[company].iloc[0]) * 100
+        series.append({"name": company, "x": aligned.index.strftime("%Y-%m-%d").tolist(),
+                       "y": values.round(4).tolist(), "dash_style": styles[index]})
+
     names = ", ".join(s["name"] for s in series)
     chart = chart_payload(
         title="Relative performance (start = 100)",
         figure=line_figure(series, y_title="Indexed to 100", hover_format=",.2f"),
-        description=f"Relative performance of {names}, each rebased to 100 at the start.",
+        description=f"Relative performance of {names}, rebased to 100 on the same date: {aligned.index[0].date()}. {len(aligned)} shared observations through {aligned.index[-1].date()}. Coincident returns can overlap; line patterns and legend toggles distinguish them.",
     )
 
     skipped = f" {', '.join(failures)} could not be included." if failures else ""
     return _drawn(
         tool_call_id,
         chart,
-        f"Chart drawn: {names} rebased to 100 at the start of the period.{skipped}",
+        f"Chart drawn: {names}, each with {len(aligned)} observations rebased to 100 on {aligned.index[0].date()}, through {aligned.index[-1].date()}.{skipped}",
     )
 
 
@@ -247,8 +257,11 @@ def plot_prediction(
         if value is None:
             return _failed(tool_call_id, "This model did not return a numeric return forecast.")
         label = f"{forecast['forecast_horizon_observations']} observations ({forecast['horizon_basis']})"
-        figure = go.Figure(go.Bar(x=[label], y=[value * 100], name="Predicted log return"))
-        figure.update_layout(yaxis_title="Predicted log return (%)", template="plotly_white")
+        figure = go.Figure(go.Bar(x=[label], y=[value * 100], name="Predicted log return", marker_color=series_color(0),
+                                 hovertemplate="%{y:.3f}% log return<extra></extra>"))
+        figure.update_layout(yaxis_title="Predicted log return (%)", paper_bgcolor="rgba(0,0,0,0)",
+                             plot_bgcolor="rgba(0,0,0,0)", font={"color": MUTED_INK}, height=300,
+                             margin={"l": 12, "r": 12, "t": 20, "b": 20}, yaxis={"gridcolor": GRID_LINE})
         description = (
             f"As of {forecast['as_of']}; model {forecast['model_version']}; "
             f"deployment: {forecast['deployment_status']}. {FORECAST_DISCLAIMER}"

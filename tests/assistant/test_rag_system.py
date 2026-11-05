@@ -19,7 +19,24 @@ from stock_assistant.graph import (
     recent_exchange,
     route_after_grade,
     should_continue,
+    grade_answer,
 )
+
+
+def test_grader_receives_current_tool_evidence_and_returns_specific_repairs():
+    grader = MagicMock()
+    grader.invoke.return_value = MagicMock(binary_score="no", feedback="State the actual as-of date.")
+    state = {"question": "Forecast BIAT", "generation": "Today's forecast is up", "retries": 0,
+             "messages": [HumanMessage(content="Forecast BIAT"),
+                          ToolMessage(content='{"as_of":"2026-10-09"}', name="predict_stock", tool_call_id="p"),
+                          AIMessage(content="Today's forecast is up")],
+             "charts": [{"title": "BIAT forecast", "description": "As of 2026-10-09"}]}
+    with patch("stock_assistant.graph.answer_grader_agent", grader), patch("stock_assistant.graph.max_retries", return_value=1):
+        result = grade_answer(state)
+    evidence = json.loads(grader.invoke.call_args.args[0]["evidence"])
+    assert evidence["tools"][0]["tool"] == "predict_stock"
+    assert evidence["charts"][0]["title"] == "BIAT forecast"
+    assert "actual as-of date" in result["messages"][0].content
 
 
 class ScriptedLLM:
@@ -386,7 +403,7 @@ def test_a_chart_reaches_the_answer():
 
     graph, patches = build(llm, tools=[plot_stock])
     try:
-        with patch("stock_assistant.tools.frames.load_company_df", return_value=history):
+        with patch("stock_assistant.tools.frames.load_closing_history", return_value=history):
             state = ask(graph, "chart AB")
     finally:
         for p in patches:
@@ -417,7 +434,7 @@ def test_a_chart_does_not_follow_the_conversation_into_the_next_answer():
 
     graph, patches = build(llm, tools=[plot_stock])
     try:
-        with patch("stock_assistant.tools.frames.load_company_df", return_value=history):
+        with patch("stock_assistant.tools.frames.load_closing_history", return_value=history):
             first = ask(graph, "chart AB", thread_id="thread-c")
             second = ask(graph, "and what about the news?", thread_id="thread-c")
     finally:

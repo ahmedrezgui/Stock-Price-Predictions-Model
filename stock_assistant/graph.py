@@ -171,7 +171,7 @@ def collect_sources(messages, extra=None) -> List[dict]:
             i
             for i in range(len(messages) - 1, -1, -1)
             if isinstance(messages[i], HumanMessage)
-            and message_text(messages[i]) != RETRY_PROMPT
+            and not message_text(messages[i]).startswith(RETRY_PROMPT)
             and not message_text(messages[i]).startswith("The stored archive did not settle this.")
         ),
         0,
@@ -363,10 +363,26 @@ def grade_answer(state: State):
     """
     generation = state.get("generation") or ""
     retries = state.get("retries") or 0
+    feedback = ""
 
     if generation:
         try:
-            grade = answer_grader_agent.invoke({"question": state["question"], "answer": generation}).binary_score
+            start = next((i for i in range(len(state["messages"]) - 1, -1, -1)
+                          if isinstance(state["messages"][i], HumanMessage)
+                          and message_text(state["messages"][i]) == state["question"]), 0)
+            evidence = [{"tool": m.name, "result": message_text(m)[:4000]}
+                        for m in state["messages"][start:] if isinstance(m, ToolMessage)]
+            chart_evidence = [{"title": c.get("title"), "description": c.get("description")}
+                              for c in state.get("charts", [])]
+            evaluation = answer_grader_agent.invoke({
+                "question": state["question"], "answer": generation,
+                "evidence": json.dumps({"tools": evidence[-16:], "charts": chart_evidence,
+                                        "web_sources": state.get("web_sources", []),
+                                        "fallback_search": [message_text(m)[:8000] for m in state["messages"][start:]
+                                                            if isinstance(m, HumanMessage) and message_text(m).startswith("The stored archive did not settle this.")]}, ensure_ascii=False),
+            })
+            grade = evaluation.binary_score
+            feedback = getattr(evaluation, "feedback", "")
         except Exception as e:
             # Never withhold a written answer because the grader was unreachable.
             print(f"Answer grading failed, accepting the answer: {e}")
@@ -379,7 +395,7 @@ def grade_answer(state: State):
             return {
                 "grade": "no",
                 "retries": retries + 1,
-                "messages": [HumanMessage(content=RETRY_PROMPT)],
+                "messages": [HumanMessage(content=RETRY_PROMPT + ("\nRepair these issues: " + feedback if isinstance(feedback, str) and feedback else ""))],
             }
         if not state.get("web_searched") and web_search_configured():
             return {"grade": "fallback"}
@@ -465,7 +481,7 @@ def create_agents_graph(checkpointer=None, tools=None):
     return workflow.compile(checkpointer=checkpointer)
 
 
-def ask(graph, question: str, thread_id: str) -> dict:
+def ask(graph, question: str, thread_id: str, callbacks=None) -> dict:
     """
     Put one question to the assistant and return its answer.
 
@@ -486,6 +502,7 @@ def ask(graph, question: str, thread_id: str) -> dict:
             "configurable": {"thread_id": thread_id},
             "recursion_limit": int(os.getenv("ASSISTANT_RECURSION_LIMIT", "40")),
             "metadata": {"conversation_id": thread_id},
+            "callbacks": callbacks or [],
         },
     )
     return {

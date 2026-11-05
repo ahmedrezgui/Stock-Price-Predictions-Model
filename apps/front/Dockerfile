@@ -1,25 +1,10 @@
-FROM condaforge/miniforge3:latest
-
+FROM python:3.11-slim
 WORKDIR /app
-
-COPY . /app
-
-RUN mamba env create --quiet --file environment-frontend.yml \
- && conda clean -afy \
- && mamba clean --all --yes
-
- SHELL ["conda", "run", "-n", "stock-frontend", "/bin/bash", "-lc"]
-
-# Copy the repo into /app so that your app files are available
-COPY . /app
-
+RUN pip install --no-cache-dir 'streamlit>=1.40,<2' 'plotly>=5,<7' 'requests-cache>=1,<2' 'python-dotenv>=1,<2' 'pandas>=2.1,<4'
+COPY apps/front /app/apps/front
+COPY .streamlit /app/.streamlit
+RUN useradd --create-home frontend && chown -R frontend:frontend /app
+USER frontend
+ENV FRONTEND_CACHE_EXPIRATION_TIME=300 WINDOW_SIZE=20
 EXPOSE 8501
-
-# Default environment variables (to be overridden in Azure)
-ENV BACKEND_URL=""
-ENV FRONTEND_CACHE_EXPIRATION_TIME="300"
-ENV WINDOW_SIZE="20"
-
-SHELL ["/bin/bash", "-lc"]
-
-ENTRYPOINT ["bash", "-lc", "source /opt/conda/etc/profile.d/conda.sh && conda activate stock-frontend && streamlit run apps/front/home.py --server.port 8501 --server.address 0.0.0.0"]
+CMD ["streamlit", "run", "apps/front/home.py", "--server.port", "8501", "--server.address", "0.0.0.0", "--browser.gatherUsageStats", "false"]

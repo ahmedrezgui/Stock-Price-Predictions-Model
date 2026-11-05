@@ -180,3 +180,111 @@ and response contract with `FORECAST_API_KEY`. An Azure ML managed `/score`
 endpoint is a different contract and needs an adapter for its deployed scoring
 script; do not set its URL as this API base URL. Registering models in Azure ML
 and downloading them for local inference is not remote deployment inference.
+
+
+## Azure single-user deployment (14 October 2026)
+
+The Azure rollout uses the existing forecasting API and registry, an Azure OpenAI
+`stock-assistant` deployment (GPT-4.1 mini, Global Standard), and a separate
+Workload Profiles Container Apps environment with only the Consumption profile.
+Express environments do not support the required sidecars, Easy Auth or Azure Files.
+
+`infrastructure/azure/assistant-llm.bicep` defines the LLM. The complete app is in
+`infrastructure/azure/stockwise-app.bicep`. It separates the frontend, dashboard API,
+assistant, MLflow and gateway into containers in one single-replica app. Only the
+gateway is exposed. A browser password prompt protects the app and MLflow over
+HTTPS. Microsoft sign-in is disabled because tenant administrator consent was
+required. Share neither the password nor the private deployment parameters.
+
+- Frontend: Streamlit, through the authenticated gateway.
+- Dashboard: `apps.back.dashboard:app`, validated date/closing-price history plus remote forecasts.
+  Display history does not require valid opening/high/low fields; model-input OHLC
+  validation remains strict. Missing deployed models do not prevent history charts.
+- Assistant: `stock_assistant.api:app`, Azure LLM plus the existing Azure forecast API.
+- MLflow: `/mlflow/` behind the same password protection; the assistant uses the
+  private loopback tracking endpoint. This is separate from forecasting MLflow in Azure ML.
+- Persistence: a dedicated Azure Files share holds the market CSV snapshot and
+  MLflow traces/artifacts. The small demo uses MLflow's explicitly enabled file
+  store with a single worker, not SQLite over SMB. Move to a supported SQL tracking
+  backend before scaling beyond this demo. Existing local traces are not migrated.
+- Chat history is in memory and resets on restart/scale-to-zero. Streamlit sessions
+  likewise do not survive restarts. Market data is a deployment snapshot and must
+  be refreshed from the maintained datasets; no automatic refresh job is added.
+
+The app scales from zero to one replica (2 vCPU / 4 GiB total across containers).
+Close browser tabs when finished: active WebSocket sessions can keep it running.
+The subscription has a monthly budget target of 20 billing-currency units, not a
+spending cap or automatic shutdown; no email notifications were configured.
+Azure retail pricing checked for UK South lists GPT-4.1 mini Global Standard at
+USD 0.40 / million input tokens and USD 1.60 / million output tokens. Include all
+agent/tool iterations and graders when estimating token use. Registry, build,
+compute, storage, existing forecast resources and third-party search cost extra.
+
+The assistant Dockerfile accepts `--build-arg ASSISTANT_EXTRAS=assistant,azure-llm,retrieval`.
+It omits training-only PyTorch/Matplotlib/statsmodels; inference stays remote.
+Builds use a curated source context without `.env`, local models or datasets, and
+images are deployed by digest. Credentials stay in Container Apps secrets and
+ignored local deployment parameters (`artifacts/stockwise.parameters.json`).
+Never commit that generated parameters file. The gateway uses HTTP Basic authentication
+over HTTPS. The username is `stockwise`; the generated password is saved locally as
+`STOCKWISE_APP_PASSWORD` in `.env`. Azure stores only its salted SHA-512 crypt hash.
+Protect and rotate the password; browsers may retain it until closed.
+
+For future changes, build new image tags in ACR, update their digests in private
+parameters, validate the Bicep deployment, then deploy. Keep external ingress off
+until gateway password protection has been verified. Microsoft sign-in is disabled.
+The deployed frontend must point at the new dashboard API, not the legacy backend.
+
+Deployed URLs:
+
+- App: https://stockwise-app.blueriver-6d32164c.uksouth.azurecontainerapps.io/
+- Assistant MLflow: https://stockwise-app.blueriver-6d32164c.uksouth.azurecontainerapps.io/mlflow/
+
+Use username `stockwise` and the local `.env` value `STOCKWISE_APP_PASSWORD`.
+The first request after scale-to-zero can take longer while containers start.
+
+### Market terminal
+
+The dashboard lists only locally chartable stocks present in the remote `/models`
+catalog with an LSTM return model at horizon 1. It pins each prediction request to
+the catalog model version. A catalog outage does not fall back to all CSV symbols;
+a temporarily unavailable forecast is shown explicitly alongside its history.
+
+The terminal supports candles/lines, volume, selectable SMA and EMA windows
+(5/10/20/50/100/200 bars), Bollinger Bands (20 bars, two population standard
+deviations), Wilder RSI (14), and MACD (12/26/9). Indicators are computed before
+cropping the selected time range, with warmup gaps preserved. Invalid OHLC bars
+are excluded from candles; invalid volume values remain missing. Display logic
+never relaxes model training or inference validation. Price units and observation
+dates come from the source snapshot, not a live exchange feed.
+
+Frontend chart calculations live in `apps/front/trading_charts.py`; the theme is
+in `.streamlit/config.toml`. The chart includes separate aligned volume/momentum
+panels, configurable overlays, zoom/pan, and CSV export. Use Refresh to invalidate
+the local response cache when deployments or market data change.
+
+Daily data publication, forecast refresh and the proposed multi-horizon model are
+documented in [dynamic_forecasts.md](dynamic_forecasts.md).
+
+
+### Live research activity
+
+The chat uses `POST /chat/stream` with the same question/thread ID body as
+`POST /chat`. It returns newline-delimited JSON (`application/x-ndjson`):
+`status`, `progress`, periodic `heartbeat`, then exactly one `result` or `error`
+for a connected request. Progress has a unique execution `id`, a public `label`,
+`status` (`running`, `completed`, `failed`), and an optional allowlisted tool name.
+Parallel calls and retries have separate IDs. The final result keeps the existing
+`text`, `sources`, `charts`, and `thread_id` fields. `/chat` remains available.
+
+The UI shows a live collapsible activity panel and retains completed activity
+with the answer in browser-session history. Progress does not include prompts,
+tool arguments/results, provider errors, or model reasoning. Answers appear after
+final grading; intermediate drafts are deliberately not token-streamed.
+
+Restart the assistant and frontend together to enable this feature locally.
+The frontend reads the assistant stream server-to-server, so the public gateway
+continues to carry Streamlit's WebSocket updates. Streaming responses disable
+proxy buffering and send idle heartbeats. Disconnecting stops delivery and skips
+queued turns that have not started; an already-running model/tool operation may
+finish and update conversation state. It is not a provider cancellation request.

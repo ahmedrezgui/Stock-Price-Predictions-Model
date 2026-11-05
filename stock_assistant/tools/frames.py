@@ -12,7 +12,7 @@ import json
 import pandas as pd
 
 from market_data import CompanyNotFoundError, DataUnavailableError
-from market_data.history import list_companies, load_company_df
+from market_data.history import list_companies, load_company_df, load_closing_history
 
 
 class BadDateError(ValueError):
@@ -42,7 +42,7 @@ def company_not_found_error(company: str) -> str:
     return tool_error(f"No data for '{company}'.", available_companies=available)
 
 
-def load_window(company: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+def load_window(company: str, start_date: str = None, end_date: str = None, display_only=False) -> pd.DataFrame:
     """
     Load a company's price history, narrowed to a date range and sorted oldest first.
 
@@ -57,7 +57,7 @@ def load_window(company: str, start_date: str = None, end_date: str = None) -> p
         BadDateError: a date argument could not be parsed.
         EmptyRangeError: no trading days fall inside the range.
     """
-    df = load_company_df(company)
+    df = load_closing_history(company) if display_only else load_company_df(company)
 
     try:
         if start_date:

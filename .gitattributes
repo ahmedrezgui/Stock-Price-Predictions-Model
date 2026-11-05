@@ -2,3 +2,6 @@
 /configs/initial_release.json -text
 /configs/release_policy.json -text
 /configs/release_policies/*.json -text
+
+# Linux container entrypoint scripts must retain LF line endings.
+/infrastructure/azure/gateway/*.sh text eol=lf

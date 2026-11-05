@@ -1,0 +1,18 @@
+{
+  "created_at": "2026-10-14T12:19:33.877787+00:00",
+  "mode": "apply",
+  "stocks": [
+    {
+      "symbol": "AL",
+      "model_version": "AL-lstm-return-h1-2dd84898980a",
+      "as_of": "2026-10-12",
+      "rows": 2754,
+      "sha256": "0d514c190619d56f7c7902ba6eb3d236ddb4af8562c67caf63b85f52cee7a644",
+      "status": "failed",
+      "serving_published": true,
+      "error": "RuntimeError",
+      "detail": "Dashboard snapshot upload failed for AL: ERROR: The command failed with an unexpected error. Here is the traceback:\nERROR: Unable to determine account name for shared key credential.\nTraceback (most recent call last):\n  File \"D:\\a\\_work\\1\\s\\build_scripts\\windows\\artifacts\\cli\\Lib\\site-packages\\knack/cli.py\", line 233, in invoke\n  File \"D:\\a\\_work\\1\\s\\build_scripts\\windows\\artifacts\\cli\\Lib\\site-packages\\azure/cli/core/commands/__init__.py\", line 677, in execute\n  File \"D:\\a\\_work\\1\\s\\build_scripts\\windows\\artifacts\\cli\\Lib\\site-packages\\azure/cli/core/commands/__init__.py\", line 820, in _run_jobs_serially\n  File \"D:\\a\\_work\\1\\s\\build_scripts\\windows\\artifacts\\cli\\Lib\\site-packages\\azure/cli/core/commands/__init__.py\", line 812, in _run_job\n  File \"D:\\a\\_work\\1\\s\\build_scripts\\windows\\artifacts\\cli\\Lib\\site-packages\\azure/cli/command_modules/storage/__init__.py\", line 357, in new_handler\n  File \"D:\\a\\_work\\1\\s\\build_scripts\\windows\\artifacts\\cli\\Lib\\site-packages\\azure/cli/command_modules/storage/__init__.py\", line 357, in new",
+      "action": "Check Azure access, source freshness and service health, then rerun. Earlier successful symbols remain published."
+    }
+  ]
+}
